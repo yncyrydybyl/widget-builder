@@ -112,7 +112,9 @@ RDNA 3.5, shared memory), October 2026:
   widget reads prompts in parts and learns a safe part size per model.
 - **Bigger was not better here:** 3B and 4B built no more working apps, only slower.
 - **LFM2-8B-A1B** (mixture of experts, through Transformers.js) was as fast as the 1.5B but built
-  2 of 4 apps, and its ONNX runtime made the widget 26 MB bigger; it was removed in 0.3.0.
+  2 of 4 apps, and its ONNX runtime made the widget 26 MB bigger; it was removed in 0.3.0. Its
+  files (about 5 GB) are deleted from the browser's Cache Storage once on start, and only those:
+  the widgets on marcade.store share one origin, and Room LLM keeps its models in the same cache.
 
 ## Trying apps out before showing them
 

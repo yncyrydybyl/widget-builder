@@ -3,7 +3,8 @@
 // It answers like the echo engine (the template from the prompt, or the
 // settings with the request as title), and by the request's words:
 //   "slow"  only keepalives, never an answer (for Stop);
-//   "fail"  a 500 whose message reads like a GPU loss (must not trigger GPU recovery).
+//   "fail"  a 500 whose message reads like a GPU loss (must not trigger GPU recovery);
+//   "broken" a first answer that uses the network, fixed in the fix round.
 // `cors: false` sends no CORS headers, as colibri does for an origin it was not given.
 import { createServer } from "node:http";
 
@@ -50,7 +51,9 @@ export function startFakeColibri({ cors = true, key = "" } = {}) {
         else {
             const current = all.match(/<current-app>\n([\s\S]*?)\n<\/current-app>/)?.[1];
             const template = all.match(/<template[^>]*>\n([\s\S]*?)\n<\/template>/)?.[1] ?? "<!doctype html><html><body>empty</body></html>";
-            const html = (current ?? template).replace(/<title>[^<]*<\/title>/, `<title>${request.slice(0, 40).replace(/[<&]/g, "")}</title>`);
+            let html = (current ?? template).replace(/<title>[^<]*<\/title>/, `<title>${request.slice(0, 40).replace(/[<&]/g, "")}</title>`);
+            if (current) html = html.replace('<script>fetch("/x");</script>', "");
+            else if (/\bbroken\b/.test(request)) html = html.replace("</body>", '<script>fetch("/x");</script></body>');
             text = `Here is the app.\n\n\`\`\`html\n${html}\n\`\`\`\nIt is a ${request}.`;
         }
         // In a few pieces, as a model streams.

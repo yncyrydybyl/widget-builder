@@ -59,6 +59,21 @@ test("builds apps with a colibri server: settings only, code, a change", async (
     expect(prefs).toMatchObject({ modelId: "colibri", colibriUrl: `${fake.url}/v1`, colibriKey: "s3cret" });
 });
 
+test("an answer with problems goes back to colibri in a fix round", async ({ page }) => {
+    fake = await startFakeColibri();
+    const w = await openWithColibri(page, fake.url);
+    await expect(w.getByText(/^Ready:/)).toBeVisible();
+    await w.getByRole("textbox", { name: "App description" }).fill("a broken app that needs code");
+    await w.getByRole("button", { name: "Build app" }).click();
+    await expect(w.getByText("It uses the network; apps have no network access.").first()).toBeVisible();
+    await expect(w.getByText("Asking the model to fix these problems…")).toBeVisible();
+    await expect(w.locator('main[data-busy="false"]')).toBeVisible({ timeout: 15_000 });
+    await expect(w.getByText("Tried the app out: it works.").last()).toBeVisible();
+    const chats = fake.requests.filter((r) => r.path === "/v1/chat/completions").map((r) => JSON.stringify(r.body.messages));
+    expect(chats.at(-1)).toContain("<current-app>");
+    expect(chats.at(-1)).toContain("It uses the network");
+});
+
 test("Stop aborts the colibri request; its errors are reported, not treated as a GPU reset", async ({ page }) => {
     fake = await startFakeColibri();
     const w = await openWithColibri(page, fake.url);

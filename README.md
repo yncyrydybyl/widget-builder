@@ -125,6 +125,24 @@ it reads a long prompt, which keep the stall watchdog quiet.
   preferences, never in the room.
 - **Model:** Qwen3-Coder-30B-A3B (`./start-here.sh --model qwen3-coder-30b`, 19 GB, 8–18 GB RAM)
   is the one to use. OLMoE answers at most 1024 tokens with a 4k context, too little for an app.
+- **Cache all its experts** when the RAM allows (`--cap 128`, about 15 GB): with the default 8 per
+  layer, three quarters of the time went to disk reads and it wrote 1.5 tokens/s instead of 7–10.
+
+Benchmark on the same laptop's CPU (Ryzen AI 7 350, 16 threads, 46 GB; another job was using the
+GPU and some CPU meanwhile), colibri at bf24429, Qwen3-Coder-30B-A3B with `--cap 128`, one run
+each:
+
+| Task | Result | Time |
+|---|---|---|
+| poll | works, settings only | 26 s |
+| list | works, settings only | 18 s |
+| guestbook (no template) | works, code | 110 s |
+| poll with `settings=0` (code) | works | 153 s |
+| tic-tac-toe for two (`tictactoe`) | works, first answer, from the board game template | 265 s |
+
+5 of 5 apps work, none needed a fix round. Code is written at 8–10 tokens/s, prompts of
+1,200–2,400 tokens included; a 118-line game took about 2 minutes of generation. That is slower
+per app than Coder 1.5B on the GPU (about 50 s), but a 30B model.
 - **Local Network Access.** An https page calling loopback needs the user's permission in Chrome
   (142 and later). In Chromium 153 the request fails at once (`Failed to fetch`, nothing
   reaches the server) until permission is granted, and the permission belongs to the

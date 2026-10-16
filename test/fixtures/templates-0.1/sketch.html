@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shared sketch</title>
+<style>
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .swatch { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
+  .swatch.active { border-color: var(--fg); }
+  button.clear { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; margin-left: auto; }
+  canvas { display: block; width: 100%; aspect-ratio: 3 / 2; background: #ffffff; border: 1px solid var(--line); border-radius: 10px; touch-action: none; cursor: crosshair; }
+</style>
+</head>
+<body>
+<h1 id="heading">Shared sketch</h1>
+<div class="tools" id="tools">
+  <button class="clear" id="clear" type="button">Clear</button>
+</div>
+<canvas id="canvas" width="900" height="600" aria-label="Drawing area"></canvas>
+<script>
+  // Settings: a new app of this kind changes only this line.
+  const SETTINGS = {"title":"Shared sketch","colors":["#1b1b1b","#e5484d","#f5a623","#30a46c","#0090ff","#8e4ec6"]};
+  const COLORS = SETTINGS.colors;
+  document.getElementById("heading").textContent = SETTINGS.title;
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  // Shared state: finished strokes, in coordinates from 0 to 1000 so every screen size agrees.
+  let strokes = [];
+  let color = COLORS[0];
+  let current = null; // the stroke being drawn here, not shared yet
+
+  miniapp.on((ev) => {
+    const d = ev.data || {};
+    if (Array.isArray(d.stroke)) strokes.push({ points: d.stroke, color: d.color || COLORS[0] });
+    if (d.clear) strokes = [];
+    render();
+  });
+
+  // Colour buttons, made from the list above.
+  const tools = document.getElementById("tools");
+  for (const c of COLORS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "swatch" + (c === color ? " active" : "");
+    b.style.background = c;
+    b.setAttribute("aria-label", "Colour " + c);
+    b.onclick = () => {
+      color = c;
+      for (const s of tools.querySelectorAll(".swatch")) s.classList.toggle("active", s === b);
+    };
+    tools.insertBefore(b, document.getElementById("clear"));
+  }
+  document.getElementById("clear").onclick = () => miniapp.send({ clear: true });
+
+  function point(e) {
+    const r = canvas.getBoundingClientRect();
+    return [Math.round(((e.clientX - r.left) / r.width) * 1000), Math.round(((e.clientY - r.top) / r.height) * 1000)];
+  }
+  canvas.onpointerdown = (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    current = { points: [point(e)], color };
+  };
+  canvas.onpointermove = (e) => {
+    if (!current) return;
+    const p = point(e);
+    const last = current.points[current.points.length - 1];
+    if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 6) return;
+    current.points.push(p);
+    // Actions must stay small: share long strokes in pieces.
+    if (current.points.length >= 250) {
+      miniapp.send({ stroke: current.points, color: current.color });
+      current = { points: [p], color: current.color };
+    }
+    render();
+  };
+  canvas.onpointerup = canvas.onpointercancel = () => {
+    if (current && current.points.length > 0) miniapp.send({ stroke: current.points, color: current.color });
+    current = null;
+  };
+
+  function draw(stroke) {
+    const sx = canvas.width / 1000, sy = canvas.height / 1000;
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = 6;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    stroke.points.forEach(([x, y], i) => (i ? ctx.lineTo(x * sx, y * sy) : ctx.moveTo(x * sx, y * sy)));
+    if (stroke.points.length === 1) ctx.lineTo(stroke.points[0][0] * sx + 0.1, stroke.points[0][1] * sy);
+    ctx.stroke();
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const s of strokes) draw(s);
+    if (current) draw(current);
+  }
+
+  miniapp.ready(render);
+</script>
+</body>
+</html>

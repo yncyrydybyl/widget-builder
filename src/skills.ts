@@ -181,13 +181,37 @@ export function applySettings(t: Template, settings: Settings): string {
         .replace(/<title>[^<]*<\/title>/i, `<title>${escapeHtml(String(settings.title ?? t.label))}</title>`);
 }
 
+/** An app without what may differ between apps of one template: the title, the settings and the accent colour. */
+const codeOnly = (h: string): string => withAccent(h, null).replace(SETTINGS_LINE, "").replace(/<title>[^<]*<\/title>/i, "");
+
+/** A short fingerprint of a template's code (FNV-1a over `codeOnly`). */
+export function fingerprint(html: string): string {
+    let h = 0x811c9dc5;
+    for (const ch of codeOnly(html)) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+    return h.toString(16).padStart(8, "0");
+}
+
+/*
+ * Earlier versions of the templates (0.1.0 to 0.2.0), by fingerprint. Apps built
+ * from them are still that template: their settings stay editable, and applying
+ * settings rebuilds them on the current version, which upgrades their look.
+ */
+const LEGACY: Record<string, string> = {
+    "4494147f": "poll",
+    "16075318": "checklist",
+    "c68f075a": "kanban",
+    "6a92cec9": "picker",
+    "247ee3a0": "scoreboard",
+    "2a1055f2": "countdown",
+    "011ecea0": "sketch",
+};
+
 /** The template an app is, with its settings, when nothing but the settings was changed. */
 export function settingsOf(html: string): { template: Template; settings: Settings } | null {
     const m = SETTINGS_LINE.exec(html);
     if (!m) return null;
-    // The title, the settings and the accent colour may differ; nothing else.
-    const blank = (h: string): string => withAccent(h, null).replace(SETTINGS_LINE, "").replace(/<title>[^<]*<\/title>/i, "");
-    const template = TEMPLATES.find((t) => t.fields && blank(t.html) === blank(html));
+    const legacy = LEGACY[fingerprint(html)];
+    const template = TEMPLATES.find((t) => t.fields && (t.id === legacy || codeOnly(t.html) === codeOnly(html)));
     if (!template) return null;
     try {
         return { template, settings: JSON.parse(m[2]) as Settings };

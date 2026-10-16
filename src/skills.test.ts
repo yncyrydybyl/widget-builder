@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { TEMPLATES, applySettings, buildSettingsMessages, checkSettings, defaultSettings, parseSettings, settingsOf } from "./skills";
 import { titleOf, withAccent } from "./apps";
@@ -39,6 +40,20 @@ describe("settings-only mode", () => {
         expect(settingsOf(TEMPLATES.find((t) => t.id === "blank")!.html)).toBeNull();
         // An accent colour is a look, not code: still the template.
         expect(settingsOf(withAccent(html, "#d6336c"))).toMatchObject({ template: { id: "poll" } });
+    });
+
+    it("still knows apps built from the templates of 0.1 and 0.2, and upgrades them when their settings change", () => {
+        for (const t of TEMPLATES.filter((t) => t.fields)) {
+            const old = readFileSync(`test/fixtures/templates-0.1/${t.id}.html`, "utf8").replace("Lunch poll", "Team poll");
+            const found = settingsOf(withAccent(old, "#2f6fde"));
+            expect(found?.template.id, t.id).toBe(t.id);
+            expect(Object.keys(found!.settings).sort()).toEqual(Object.keys(defaultSettings(t)!).sort());
+            // Applying settings writes the current template.
+            expect(settingsOf(applySettings(t, found!.settings))?.template.id).toBe(t.id);
+        }
+        // Changed code is not the template, old or new.
+        const poll0 = readFileSync("test/fixtures/templates-0.1/poll.html", "utf8");
+        expect(settingsOf(poll0.replace("render();", "render(); render();"))).toBeNull();
     });
 
     it("checks settings from the form and says what is wrong", () => {

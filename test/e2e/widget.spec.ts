@@ -402,8 +402,14 @@ test("an app gets its own accent colour, which survives settings changes and pub
     await expect(w.getByText(/Published "Lunch poll" \(version 2\)/)).toBeVisible();
     const html = String((await sent(page)).find((e) => e.type === APP)!.content.html);
     expect(html).toContain('<html data-accent="#d6336c">');
-    // Back to the client's colour.
+    // Back to the client's colour, from the swatch or by taking data-accent out of the code.
     await w.getByRole("button", { name: "The room client's colour" }).click();
+    await expect(app.locator(".meter span").first()).toHaveCSS("background-color", "rgb(11, 122, 95)");
+    await w.getByRole("button", { name: "Colour #d6336c" }).click();
+    await w.getByText(/^Code \(/).click();
+    const code = w.getByRole("textbox", { name: "Code" });
+    await code.fill((await code.inputValue()).replace(' data-accent="#d6336c"', ""));
+    await w.getByRole("button", { name: "Apply code" }).click();
     await expect(app.locator(".meter span").first()).toHaveCSS("background-color", "rgb(11, 122, 95)");
 });
 
@@ -418,6 +424,10 @@ test("removing an app or editing over an unpublished draft asks first", async ({
     await w.getByRole("button", { name: "Edit" }).click();
     await expect(w.getByText(/Your draft in Build is not published/)).toBeVisible();
     await w.getByRole("button", { name: "cancel" }).click();
+    await w.getByRole("button", { name: "remove" }).click();
+    // An open "remove" question is not a yes to editing.
+    await w.getByRole("button", { name: "Edit" }).click();
+    await expect(w.getByText(/Your draft in Build is not published/)).toBeVisible();
     await w.getByRole("button", { name: "remove" }).click();
     await expect(w.getByText(/Remove "Lunch poll" for everyone/)).toBeVisible();
     expect((await sent(page)).filter((e) => e.type === APP)).toHaveLength(0);
@@ -443,4 +453,14 @@ test("an app's frame grows with its page", async ({ page }) => {
     const page_ = () => app.locator("html").evaluate((el) => el.scrollHeight);
     await expect.poll(async () => Math.round((await frame.boundingBox())!.height - (await page_()))).toBe(2);
     expect(await page_()).toBeGreaterThan(320);
+});
+
+test("a page sized from its frame (100vh) does not make the frame grow without end", async ({ page }) => {
+    const tall = "<!doctype html><html><head><title>t</title><style>body { min-height: 100vh; margin: 24px 0; }</style></head><body><h1>Tall</h1></body></html>";
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("tall", tall, "Tall")] });
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await w.getByRole("button", { name: "Open" }).click();
+    await expect(w.frameLocator("iframe.app-frame").getByRole("heading", { name: "Tall" })).toBeVisible();
+    await page.waitForTimeout(1500);
+    expect((await w.locator("iframe.app-frame").boundingBox())!.height).toBeLessThan(500);
 });

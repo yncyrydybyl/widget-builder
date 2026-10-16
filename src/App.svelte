@@ -18,7 +18,7 @@
     let confirming = $state<{ id: string; action: "remove" | "edit" } | null>(null);
 
     function edit(id: string): void {
-        if (c.unsaved && confirming?.id !== id) confirming = { id, action: "edit" };
+        if (c.unsaved && !(confirming?.id === id && confirming.action === "edit")) confirming = { id, action: "edit" };
         else {
             confirming = null;
             c.edit(id);

@@ -52,6 +52,10 @@ room.
 Under the preview, **Colour** gives an app its own accent colour (`<html data-accent>`), or
 leaves it with the client's. The frame grows with the app's page.
 
+Apps built from the templates of 0.1 and 0.2 keep their settings form: the builder knows those
+versions by a fingerprint of their code, and applying settings rebuilds such an app on the
+current template, which gives it the new look.
+
 ## Editing an app
 
 **Edit** in the Apps tab loads a published app back into the builder. Three ways to change it:

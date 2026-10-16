@@ -592,7 +592,8 @@ export class Controller {
         if (!this.draft || this.busy || html.trim() === this.draft.html.trim()) return;
         this.busy = true;
         try {
-            this.setDraft(html.trim());
+            // The code decides the accent too: removing data-accent in it removes the colour.
+            this.setDraft(html.trim(), accentOf(html));
             const problems = checkHtml(this.draft.html);
             this.say("note", problems.length ? "Changed the code by hand. It has problems:" : "Changed the code by hand.", { problems });
             const found = await this.tryOut(this.draft.html);

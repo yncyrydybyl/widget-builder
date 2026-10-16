@@ -248,10 +248,15 @@ export const BRIDGE = `(() => {
     document.getElementById("miniapp-theme").textContent = ":root { color-scheme: " + (info.theme === "dark" ? "dark" : "light") + "; " + Object.entries(vars).map(([k, v]) => k + ": " + v).join("; ") + "; }";
   }
   // The frame fits the app: report the page's height whenever it changes. The box, not
-  // scrollHeight, which never drops below the frame's own height.
-  let height = 0;
+  // scrollHeight, which never drops below the frame's own height. A page sized from
+  // the frame (100vh) grows by exactly what the frame just grew, without end; once
+  // that shows, stop reporting and let the app scroll in the frame it has.
+  let height = 0, viewport = innerHeight, grew = 0, grewAt = 0, follows = false;
+  addEventListener("resize", () => { grew = innerHeight - viewport; viewport = innerHeight; grewAt = Date.now(); });
   new ResizeObserver(() => {
+    if (follows) return;
     const h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    if (height && grew > 0 && Date.now() - grewAt < 250 && Math.abs(h - height - grew) <= 2) { follows = true; return; }
     if (Math.abs(h - height) > 1) post({ kind: "size", height: (height = h) });
   }).observe(document.documentElement);
   addEventListener("message", (e) => {

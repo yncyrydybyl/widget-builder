@@ -580,3 +580,30 @@ test("an app published before 0.3.0 runs without the base stylesheet, as it was 
         expect(now.weight).toBe("600");
     }
 });
+
+test("deletes LFM2-8B-A1B's cached files once, and nothing else in the shared bucket", async ({ page }) => {
+    const lfm2 = "https://huggingface.co/onnx-community/LFM2-8B-A1B-ONNX/resolve/main/onnx/model_q4f16.onnx_data";
+    const whisper = "https://huggingface.co/onnx-community/whisper-base/resolve/main/onnx/encoder_model_q4.onnx";
+    // Any page of the origin will do to fill its Cache Storage, as 0.2.x and Room LLM did.
+    await page.goto("/__test__/blank");
+    await page.evaluate(
+        async ([a, b]) => {
+            const cache = await caches.open("transformers-cache");
+            await cache.put(a, new Response("x", { headers: { "content-length": "4800000000" } }));
+            await cache.put(b, new Response("y"));
+        },
+        [lfm2, whisper],
+    );
+    const left = () => page.evaluate(async () => (await (await caches.open("transformers-cache")).keys()).map((r) => r.url));
+
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME } });
+    await expect(w.getByText("Deleted the LFM2-8B-A1B model files an earlier version downloaded (4.8 GB).")).toBeVisible();
+    expect(await left()).toEqual([whisper]);
+
+    // Once per browser: a file put back later stays, and no notice comes.
+    await page.evaluate((a) => caches.open("transformers-cache").then((c) => c.put(a, new Response("x"))), lfm2);
+    const again = await open(page, { params: { engine: "echo", matrix_user_id: ME } });
+    await expect(again.getByText("in room")).toBeVisible();
+    await expect(again.getByText(/Deleted the LFM2/)).toHaveCount(0);
+    expect((await left()).sort()).toEqual([lfm2, whisper].sort());
+});

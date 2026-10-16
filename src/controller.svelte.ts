@@ -6,7 +6,7 @@
 import type { IRoomEvent, WidgetApi } from "matrix-widget-api";
 import { APP_TYPE, BASE_VERSION, Bucket, accentOf, withAccent, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent, type AppInfo } from "./apps";
 import { stripThinking, type ChatMessage } from "./chat";
-import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadModel, webGpuStatus, type ChatOptions, type Engine, type ModelInfo } from "./llm";
+import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, deleteRemovedModels, isCached, loadModel, webGpuStatus, type ChatOptions, type Engine, type ModelInfo } from "./llm";
 import { TEMPLATES, applySettings, buildMessages, checkSettings, buildSettingsMessages, defaultSettings, parseSettings, pickTemplate, settingsOf, type Settings, type Task, type Template } from "./skills";
 import { judgeProbe, probeApp, type ProbeReport } from "./probe";
 import { capabilitiesFor, connect, initialTheme, readParams, type Params } from "./widget-connect";
@@ -176,6 +176,11 @@ export class Controller {
 
     async start(): Promise<void> {
         if (this.runnerOnly) this.running = this.runnerOnly;
+        void deleteRemovedModels().then(({ files, bytes }) => {
+            if (!files || this.runnerOnly || this.notice) return;
+            const size = bytes ? ` (${(bytes / 1e9).toFixed(1)} GB)` : "";
+            this.notice = `Deleted the LFM2-8B-A1B model files an earlier version downloaded${size}.`;
+        });
         void webGpuStatus().then((g) => {
             this.gpuProblem = this.useEcho ? null : g.problem;
             this.f16 = g.f16 && this.params.get("f16") !== "0";

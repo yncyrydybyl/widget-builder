@@ -116,6 +116,52 @@ export async function isCached(m: ModelInfo, f16: boolean): Promise<boolean> {
     }
 }
 
+/*
+ * LFM2-8B-A1B ran through Transformers.js until 0.3.0 and left ~5 GB in Cache
+ * Storage that nothing uses now. Only its own entries go, never a whole bucket:
+ * every widget on marcade.store shares this origin, and Room LLM keeps its
+ * Transformers.js models in the same `transformers-cache`.
+ */
+const REMOVED_MODELS = ["onnx-community/LFM2-8B-A1B-ONNX"];
+const REMOVED_KEY = "widget-builder.removed-models-deleted";
+
+export const isRemovedModelFile = (url: string): boolean => REMOVED_MODELS.some((m) => url.includes(`/${m}/`));
+
+export interface Freed {
+    files: number;
+    /** From Content-Length; 0 when the cached responses do not say. */
+    bytes: number;
+}
+
+/** Deletes the removed models' files from every bucket, once per browser. */
+export async function deleteRemovedModels(): Promise<Freed> {
+    const freed: Freed = { files: 0, bytes: 0 };
+    try {
+        if (localStorage.getItem(REMOVED_KEY)) return freed;
+    } catch {
+        /* no storage: look on each start, it only lists keys */
+    }
+    if (typeof caches === "undefined") return freed; // not a secure context
+    try {
+        for (const name of await caches.keys()) {
+            const cache = await caches.open(name);
+            for (const req of await cache.keys()) {
+                if (!isRemovedModelFile(req.url)) continue;
+                freed.bytes += Number((await cache.match(req))?.headers.get("content-length")) || 0;
+                if (await cache.delete(req)) freed.files++;
+            }
+        }
+    } catch {
+        return freed; // look again on the next start
+    }
+    try {
+        localStorage.setItem(REMOVED_KEY, "1");
+    } catch {
+        /* private window */
+    }
+    return freed;
+}
+
 export function loadModel(m: ModelInfo, f16: boolean, onProgress: (p: Progress) => void, contextWindow = CONTEXT_WINDOW): Promise<Engine> {
     return loadWebLlm(webLlmId(m, f16), onProgress, contextWindow);
 }

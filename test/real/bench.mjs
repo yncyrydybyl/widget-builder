@@ -50,6 +50,8 @@ const ALL_TASKS = [
     // No template fits these: how the model does on its own.
     { id: "guestbook", request: "A guestbook where everyone can leave a short message", check: addsText },
     { id: "ideas", request: "An idea board where everyone posts ideas and can upvote them", check: addsText },
+    // A game with turns, seats and win detection: where small models fail.
+    { id: "tictactoe", request: "Tic-tac-toe for two players in the room: take turns, show whose turn it is and who won", check: clickChanges },
 ];
 const TASKS = process.env.TASKS ? ALL_TASKS.filter((t) => process.env.TASKS.split(",").includes(t.id)) : ALL_TASKS;
 const REPEAT = Number(process.env.REPEAT ?? 1);

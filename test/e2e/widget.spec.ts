@@ -7,14 +7,14 @@ const EVENT = "de.datanauten.widget_builder.event";
 const WIDGETS = "im.vector.modular.widgets";
 const poll = readFileSync(new URL("../../src/skills/templates/poll.html", import.meta.url), "utf8");
 
-const appState = (id: string, html: string, name = "Lunch poll") => ({
+const appState = (id: string, html: string, name = "Lunch poll", base: number | null = 1) => ({
     type: APP,
     state_key: id,
     sender: "@bob:example.org",
     origin_server_ts: 1,
     event_id: `$state-${id}`,
     room_id: "!room:example.org",
-    content: { name, html, version: 1 },
+    content: { name, html, version: 1, ...(base === null ? {} : { base }) },
     unsigned: {},
 });
 const action = (id: string, app: string, data: unknown, sender: string, ts: number) => ({
@@ -75,7 +75,7 @@ test("builds an app from a template, previews it locally and publishes it", asyn
     await expect(w.getByText(/Published "Lunch poll"/)).toBeVisible();
     const state = (await sent(page)).find((e) => e.type === APP)!;
     expect(state.state_key).toBe("lunch-poll");
-    expect(state.content).toMatchObject({ name: "Lunch poll", version: 1 });
+    expect(state.content).toMatchObject({ name: "Lunch poll", version: 1, base: 1 });
     expect(String(state.content.html)).toContain("miniapp.send({ vote: option })");
 
     // It is added to the room as its own widget; the URL names the app, the code stays in the state event.
@@ -164,7 +164,7 @@ test("an app cannot reach the network or the widget", async ({ page }) => {
       const out = [];
       try { parent.document.title; out.push("parent: yes"); } catch { out.push("parent: no"); }
       try { localStorage.length; out.push("storage: yes"); } catch { out.push("storage: no"); }
-      fetch("http://localhost:4184/index.html").then(() => out.push("fetch: yes"), () => out.push("fetch: no"))
+      fetch("${test.info().project.use.baseURL}/index.html").then(() => out.push("fetch: yes"), () => out.push("fetch: no"))
         .finally(() => { document.getElementById("out").textContent = out.join(", "); });
     </script></body></html>`;
     const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("evil", evil, "Evil")] });
@@ -241,8 +241,9 @@ test("apps that add items through a form work, and a form cannot navigate away",
     await app.getByRole("button", { name: "Add" }).click();
     await expect(app.getByText("Bread")).toBeVisible();
 
+    // The widget's own server, whichever port the run uses.
     const leaky = `<!doctype html><html><head><title>x</title></head><body><p id="out">here</p>
-      <form id="f" action="http://localhost:4184/index.html" method="get"><button>go</button></form>
+      <form id="f" action="${new URL("/index.html", page.url())}" method="get"><button>go</button></form>
       <script>document.getElementById("f").submit();</script></body></html>`;
     const w2 = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("leaky", leaky, "Leaky")] });
     await w2.getByRole("button", { name: "Apps (1)" }).click();
@@ -546,4 +547,36 @@ test("the board game template is a real two-player game", async ({ page, context
     await expect.poll(() => actions(1)).toBe(3);
     await relay();
     for (const i of [0, 1, 2]) await expect(app(i).getByText("Click a square to play ❌.")).toBeVisible();
+});
+
+test("an app published before 0.3.0 runs without the base stylesheet, as it was made; a newer one with it", async ({ page }) => {
+    // A custom app in the 0.1/0.2 style that sets its own light background but not the text colour.
+    const custom = `<!doctype html><html><head><meta charset="utf-8"><title>Mood</title><style>
+  :root { --bg: #f7f3ff; }
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+</style></head><body><h1>Mood</h1><button id="b">Fine</button></body></html>`;
+    const look = async (base: number | null, ts: number) => {
+        const r = await open(page, { params: { engine: "echo", matrix_user_id: ME, app: "mood", theme: "dark" }, state: [{ ...appState("mood", custom, "Mood", base), origin_server_ts: ts }] });
+        const app = r.frameLocator("iframe.app-frame");
+        await expect(app.getByRole("button", { name: "Fine" })).toBeVisible();
+        // The bridge sets the colours once the app says hello.
+        await expect(app.locator("html")).toHaveAttribute("data-theme", "dark");
+        return app.locator("body").evaluate((b) => ({
+            base: !!document.getElementById("miniapp-base"),
+            bg: getComputedStyle(b).backgroundColor,
+            weight: getComputedStyle(document.getElementById("b")!).fontWeight,
+        }));
+    };
+    // Before 0.3.0 (no marker, older than the release): the host's colours win, as they did then, so dark mode stays readable.
+    const old = await look(null, 1);
+    expect(old.base).toBe(false);
+    expect(old.bg).not.toBe("rgb(247, 243, 255)");
+    expect(old.weight).toBe("400");
+    // Published since: the base stylesheet, and the app's own colours win.
+    for (const [base, ts] of [[1, 1], [null, Date.now()]] as const) {
+        const now = await look(base, ts);
+        expect(now.base).toBe(true);
+        expect(now.bg).toBe("rgb(247, 243, 255)");
+        expect(now.weight).toBe("600");
+    }
 });

@@ -87,8 +87,8 @@
     <main class="runner">
         {#if runner}
             <!-- A new version of the app replaces the running one. -->
-            {#key runner.html}
-                <AppFrame {c} html={runner.html} appId={runner.id} events={c.events[runner.id] ?? []} title={runner.name} fit={false} />
+            {#key `${runner.base}${runner.html}`}
+                <AppFrame {c} html={runner.html} appId={runner.id} events={c.events[runner.id] ?? []} title={runner.name} fit={false} base={runner.base} />
             {/key}
         {:else if c.room === "no-permission"}
             <p class="note warn">This app needs permission to read apps in this room.</p>
@@ -316,8 +316,8 @@
             {#if running}
                 <section class="preview">
                     <div class="bar"><b>{running.name}</b><span class="small muted">shared with the room</span></div>
-                    {#key running.html}
-                        <AppFrame {c} html={running.html} appId={running.id} events={c.events[running.id] ?? []} title={running.name} />
+                    {#key `${running.base}${running.html}`}
+                        <AppFrame {c} html={running.html} appId={running.id} events={c.events[running.id] ?? []} title={running.name} base={running.base} />
                     {/key}
                 </section>
             {/if}

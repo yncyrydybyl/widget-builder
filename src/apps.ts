@@ -24,6 +24,27 @@ export interface AppDoc {
     version: number;
     author: string;
     updated: number;
+    /** Built on the base stylesheet (0.3.0 and later); see `usesBase`. */
+    base: boolean;
+}
+
+/**
+ * The base stylesheet's version, written into every published app's state event
+ * (`base`). Apps published before 0.3.0 have none: they were made and checked
+ * without `BASE_CSS`, with the host's colours winning over their own, and run
+ * that way still (`withBridge(html, extra, false)`); with the base stylesheet
+ * some of them break (an app that sets its own `--bg` turns unreadable in dark
+ * mode, the 0.1 scoreboard's buttons wrap). Rebuilding one (applying settings,
+ * any change) publishes it with the marker.
+ */
+export const BASE_VERSION = 1;
+
+/** When 0.3.0 was released. Apps published with 0.3.0 and 0.3.1 have no marker but are newer than this. */
+export const BASE_SINCE = Date.UTC(2026, 9, 16, 19, 46, 12);
+
+/** Whether a published app is built on the base stylesheet: it says so, or it is newer than 0.3.0. */
+export function usesBase(content: { base?: unknown }, ts: number): boolean {
+    return typeof content.base === "number" || ts >= BASE_SINCE;
 }
 
 /** Sent to an app when it starts (the bridge's `init`). */
@@ -54,6 +75,7 @@ export function toApp(ev: IRoomEvent & { state_key?: string }): AppDoc | null {
         version: typeof c.version === "number" ? c.version : 1,
         author: ev.sender,
         updated: ev.origin_server_ts ?? 0,
+        base: usesBase(c as { base?: unknown }, ev.origin_server_ts ?? 0),
     };
 }
 
@@ -237,7 +259,12 @@ export const BRIDGE = `(() => {
   let info = null;
   const post = (m) => parent.postMessage(Object.assign({ __miniapp: true }, m), "*");
   // The host's colours as a rule, not inline styles, so an app's own CSS can override them.
+  // An app from before the base stylesheet gets them inline, as it was made with: the host's win.
   function theme(colors) {
+    if (!document.getElementById("miniapp-base")) {
+      for (const [k, v] of Object.entries(colors)) document.documentElement.style.setProperty(k, v);
+      return;
+    }
     const vars = Object.assign({}, colors);
     const accent = document.documentElement.dataset.accent;
     if (/^#[0-9a-f]{6}$/i.test(accent || "")) {
@@ -308,9 +335,13 @@ export const BRIDGE = `(() => {
   post({ kind: "hello" });
 })();`;
 
-/** The app document with the base styles and the bridge (and any extra script, such as the probe) first. */
-export function withBridge(html: string, extra = ""): string {
-    const tag = `<style>${BASE_CSS}</style><style id="miniapp-theme"></style><script>${BRIDGE}</script>${extra ? `<script>${extra}</script>` : ""}`;
+/**
+ * The app document with the base styles and the bridge (and any extra script, such
+ * as the probe) first. Without `base`, as before 0.3.0: no base styles, host colours inline.
+ */
+export function withBridge(html: string, extra = "", base = true): string {
+    const styles = base ? `<style id="miniapp-base">${BASE_CSS}</style><style id="miniapp-theme"></style>` : "";
+    const tag = `${styles}<script>${BRIDGE}</script>${extra ? `<script>${extra}</script>` : ""}`;
     if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`);
     if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${tag}</head>`);
     return `<!doctype html><html><head><meta charset="utf-8">${tag}</head><body>${html}</body></html>`;

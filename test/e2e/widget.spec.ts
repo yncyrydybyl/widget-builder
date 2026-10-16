@@ -100,6 +100,30 @@ test("builds an app from a template, previews it locally and publishes it", asyn
     expect((await sent(page)).filter((e) => e.type === WIDGETS).at(-1)).toEqual({ type: WIDGETS, state_key: "widget_builder_lunch-poll", content: {} });
 });
 
+test("a template-shaped request only fills in the settings; more than that goes to code", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME } });
+    await w.getByRole("button", { name: "Load model" }).click();
+    await w.getByRole("textbox", { name: "App description" }).fill("Team lunch poll");
+    await w.getByRole("button", { name: "Build app" }).click();
+    await expect(w.getByText(/Set up the poll template, no code changed/)).toBeVisible();
+    await expect(w.getByText("Tried the app out: it works.")).toBeVisible();
+    await expect(w.getByText("Writing the app…")).toHaveCount(0);
+    const app = w.frameLocator("iframe.app-frame");
+    await expect(app.getByRole("heading", { name: "Where do we have lunch?" })).toBeVisible();
+    await expect(w.getByRole("textbox", { name: "App name" })).toHaveValue("Team lunch poll");
+
+    // A change that the settings cover stays settings only; one that needs code gets code.
+    await w.getByRole("textbox", { name: "Change" }).fill("Lunch on Friday");
+    await w.getByRole("button", { name: "Change app" }).click();
+    await expect(w.getByText(/no code changed/)).toHaveCount(2);
+    await expect(w.getByRole("textbox", { name: "App name" })).toHaveValue("Lunch on Friday");
+    await w.getByRole("textbox", { name: "Change" }).fill("add comments, which needs code");
+    await w.getByRole("button", { name: "Change app" }).click();
+    await expect(w.getByText(/needs more than the template's settings/)).toBeVisible();
+    await expect(w.locator('main[data-busy="false"]')).toBeVisible({ timeout: 30_000 });
+    await expect(w.getByText(/no code changed/)).toHaveCount(2);
+});
+
 test("runs a published app with the room's shared actions", async ({ page }) => {
     const w = await open(page, {
         params: { engine: "echo", matrix_user_id: ME },
@@ -153,7 +177,7 @@ test("a room widget loads its app's code from the app's state event, and nothing
     );
 
     // A new version published from the builder reaches the open widget.
-    const v2 = poll.replace("Where do we have lunch?", "Where do we have dinner?");
+    const v2 = poll.replaceAll("Where do we have lunch?", "Where do we have dinner?");
     await page.evaluate((e) => (window as unknown as { __pushState: (s: unknown[]) => void }).__pushState(e), [{ ...appState("lunch", v2), event_id: "$v2" }]);
     await expect(w.frameLocator("iframe.app-frame").getByText("Where do we have dinner?")).toBeVisible();
 });

@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Poll</title>
+<title>Lunch poll</title>
 <style>
   body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
   h1 { font-size: 18px; margin: 0 0 12px; }
@@ -20,7 +20,10 @@
 <div id="options"></div>
 <p class="who" id="who"></p>
 <script>
-  const OPTIONS = ["Pizza", "Sushi", "Salad bar"];
+  // Settings: a new app of this kind changes only this line.
+  const SETTINGS = {"title":"Lunch poll","question":"Where do we have lunch?","options":["Pizza","Sushi","Salad bar"]};
+  const OPTIONS = SETTINGS.options;
+  document.getElementById("question").textContent = SETTINGS.question;
   const votes = {}; // user id -> option
 
   miniapp.on((ev) => {

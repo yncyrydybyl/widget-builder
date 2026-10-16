@@ -17,13 +17,20 @@
 </style>
 </head>
 <body>
-<h1>Shared checklist</h1>
+<h1 id="heading">Shared checklist</h1>
 <form id="add">
   <input id="text" type="text" placeholder="New item" aria-label="New item" maxlength="200">
   <button type="submit">Add</button>
 </form>
 <ul id="list"></ul>
 <script>
+  // Settings: a new app of this kind changes only this line.
+  const SETTINGS = {"title":"Shared checklist","placeholder":"New item","button":"Add"};
+  document.getElementById("heading").textContent = SETTINGS.title;
+  document.getElementById("text").placeholder = SETTINGS.placeholder;
+  document.getElementById("text").setAttribute("aria-label", SETTINGS.placeholder);
+  document.querySelector("#add button").textContent = SETTINGS.button;
+
   const items = new Map(); // event id -> { text, done, by }
 
   miniapp.on((ev) => {

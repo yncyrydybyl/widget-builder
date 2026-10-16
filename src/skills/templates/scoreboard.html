@@ -16,13 +16,19 @@
 </style>
 </head>
 <body>
-<h1>Scoreboard</h1>
+<h1 id="heading">Scoreboard</h1>
 <form id="add">
   <input id="name" placeholder="Player or team" aria-label="Player or team" maxlength="40">
   <button type="submit" aria-label="Add player">＋</button>
 </form>
 <table><tbody id="rows"></tbody></table>
 <script>
+  // Settings: a new app of this kind changes only this line.
+  const SETTINGS = {"title":"Scoreboard","placeholder":"Player or team"};
+  document.getElementById("heading").textContent = SETTINGS.title;
+  document.getElementById("name").placeholder = SETTINGS.placeholder;
+  document.getElementById("name").setAttribute("aria-label", SETTINGS.placeholder);
+
   const scores = new Map(); // name -> points
 
   miniapp.on((ev) => {

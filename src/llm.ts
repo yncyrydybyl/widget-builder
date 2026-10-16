@@ -119,6 +119,14 @@ export async function webGpuStatus(): Promise<GpuStatus> {
                 f16: false,
             };
         }
+        // A software adapter (SwiftShader) loads a model in minutes and then never
+        // finishes an answer; seen in headless Chrome on a Radeon 860M.
+        const info = adapter.info as GPUAdapterInfo & { isFallbackAdapter?: boolean };
+        if (info.isFallbackAdapter || /swiftshader/i.test(`${info.vendor} ${info.architecture} ${info.description}`))
+            return {
+                problem: "WebGPU runs in software (SwiftShader) here, not on the GPU, so a model would never finish an answer. Turn on hardware acceleration (check chrome://gpu).",
+                f16: false,
+            };
         return { problem: null, f16: adapter.features.has("shader-f16") };
     } catch (e) {
         return { problem: `WebGPU failed: ${String(e)}`, f16: false };
@@ -318,6 +326,14 @@ export class EchoEngine implements Engine {
 
     async chat(messages: ChatMessage[], onText: (soFar: string) => void, opts: ChatOptions = {}): Promise<string> {
         const all = messages.map((m) => m.content).join("\n");
+        // Settings-only mode: the request becomes the title; "code" in it asks for code instead.
+        const settings = all.match(/Its settings now:\n```json\n([\s\S]*?)\n```/)?.[1];
+        if (settings) {
+            const asked = all.split("Request from ").at(-1)!.split("\n")[0].split(":").slice(1).join(":").trim();
+            const text = /\bcode\b/i.test(asked) ? '{"custom": true}' : "```json\n" + JSON.stringify({ ...JSON.parse(settings), title: asked.slice(0, 40) }) + "\n```";
+            onText(text);
+            return text;
+        }
         const current = all.match(/<current-app>\n([\s\S]*?)\n<\/current-app>/)?.[1];
         const template = all.match(/<template[^>]*>\n([\s\S]*?)\n<\/template>/)?.[1] ?? "<!doctype html><html><body>empty</body></html>";
         const request = messages.at(-1)?.content.split("Request from ").at(-1)?.split(":").slice(1).join(":").trim() ?? "";

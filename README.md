@@ -98,6 +98,27 @@ Typical catch: asked to rename the kanban board, the model also dropped the `ren
 apps that need fixes take 2.5–4 min. The benchmark's checks are separate code from the probe,
 but both type and click, so they are not fully independent.
 
+## Settings only, when a template fits
+
+Every template starts with one `const SETTINGS = {…};` line (a poll's question and options, a
+board's columns, a countdown's date). When a request matches a template, the model first gets a
+short prompt: what the app does, its settings, the request. It answers with the settings as JSON,
+or `{"custom": true}` when the request needs more than they allow; then, and when the JSON is
+unusable or the click-through test fails, it writes code as before. A change to an app that is
+still the template with other settings tries settings first too. `#/?settings=0` turns it off.
+
+Benchmark, same machine and tasks as above:
+
+| | Apps that work | Time for 24 apps |
+|---|---|---|
+| Code, with the probe | 23/24 (96%) | 32 min |
+| Settings first, with the probe | 24/24 (100%) | 11 min |
+
+18 of 24 apps were settings only, at 8–10 s each instead of about 50 s. The scoreboard and the
+sketch pad went to code both times; the guestbook has no template. The benchmark does not check
+every feature a request names: neither idea board has upvotes (one settings only, a plain kanban
+board; one code), and both pass because adding ideas works.
+
 ## Limits
 
 - **Apps replay only recent history.** Hosts return roughly the last 50–100 app events, so an

@@ -14,13 +14,16 @@
 </style>
 </head>
 <body>
-<h1>Shared sketch</h1>
+<h1 id="heading">Shared sketch</h1>
 <div class="tools" id="tools">
   <button class="clear" id="clear" type="button">Clear</button>
 </div>
 <canvas id="canvas" width="900" height="600" aria-label="Drawing area"></canvas>
 <script>
-  const COLORS = ["#1b1b1b", "#e5484d", "#f5a623", "#30a46c", "#0090ff", "#8e4ec6"];
+  // Settings: a new app of this kind changes only this line.
+  const SETTINGS = {"title":"Shared sketch","colors":["#1b1b1b","#e5484d","#f5a623","#30a46c","#0090ff","#8e4ec6"]};
+  const COLORS = SETTINGS.colors;
+  document.getElementById("heading").textContent = SETTINGS.title;
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
   // Shared state: finished strokes, in coordinates from 0 to 1000 so every screen size agrees.

@@ -5,9 +5,9 @@
  */
 import type { IRoomEvent, WidgetApi } from "matrix-widget-api";
 import { APP_TYPE, Bucket, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent } from "./apps";
-import { stripThinking } from "./chat";
-import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadModel, webGpuStatus, type Engine, type ModelInfo } from "./llm";
-import { TEMPLATES, buildMessages, pickTemplate, type Task } from "./skills";
+import { stripThinking, type ChatMessage } from "./chat";
+import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadModel, webGpuStatus, type ChatOptions, type Engine, type ModelInfo } from "./llm";
+import { TEMPLATES, applySettings, buildMessages, buildSettingsMessages, defaultSettings, parseSettings, pickTemplate, settingsOf, type Settings as AppSettings, type Task, type Template } from "./skills";
 import { judgeProbe, probeApp, type ProbeReport } from "./probe";
 import { capabilitiesFor, connect, initialTheme, readParams, type Params } from "./widget-connect";
 
@@ -121,6 +121,8 @@ export class Controller {
     private best: { html: string; problems: string[] } | null = null;
     /** `#/?probe=0` turns the click-through test off (for tests of the plain flow). */
     readonly useProbe = this.params.get("probe") !== "0";
+    /** `#/?settings=0`: always write code, even for a request a template's settings cover. */
+    readonly useSettings = this.params.get("settings") !== "0";
 
     get model(): string {
         return this.engine?.modelId ?? "";
@@ -250,10 +252,16 @@ export class Controller {
         if (!text || this.busy) return;
         this.say("user", text);
         let task: Task;
-        if (this.draft) task = { kind: "change", request: text, current: this.draft.html };
-        else {
+        if (this.draft) {
+            // Still the template with other settings: a change may be settings only too.
+            const s = settingsOf(this.draft.html);
+            if (s && (await this.trySettings(s.template, s.settings, text)) !== "code") return;
+            task = { kind: "change", request: text, current: this.draft.html };
+        } else {
             const template = this.startFrom === "auto" ? pickTemplate(text) : (TEMPLATES.find((t) => t.id === this.startFrom) ?? pickTemplate(text));
             this.say("note", `Starting from the ${template.label.toLowerCase()} template.`);
+            const settings = defaultSettings(template);
+            if (settings && (await this.trySettings(template, settings, text)) !== "code") return;
             task = { kind: "create", request: text, template };
         }
         await this.run(task);
@@ -290,41 +298,11 @@ export class Controller {
         try {
             const messages = buildMessages(task, this.userId);
             this.lastPromptChars = messages.reduce((n, m) => n + m.content.length, 0);
-            // Watchdog: a hung GPU never answers and never reports an error.
-            let lastProgress = Date.now();
-            let stalled = false;
-            const watchdog = setInterval(() => {
-                if (Date.now() - lastProgress < STALL_MS) return;
-                stalled = true;
-                this.abort?.abort();
-            }, 5000);
-            let raw: string;
-            try {
-                raw = await Promise.race([
-                    engine.chat(
-                        messages,
-                        (soFar) => {
-                            lastProgress = Date.now();
-                            update({ text: "Writing the app…", lines: soFar.split("\n").length });
-                        },
-                        {
-                            signal: this.abort.signal,
-                            chunkChars: this.settings.chunks[engine.modelId] ?? FIRST_CHUNK,
-                            onRound: (i, of) => {
-                                lastProgress = Date.now();
-                                update({ text: `Reading the instructions (part ${i} of ${of})…` });
-                            },
-                            maxTokens: 3000,
-                            temperature,
-                        },
-                    ),
-                    // The engine may not even return after the abort; do not wait for it.
-                    new Promise<never>((_, reject) => this.abort!.signal.addEventListener("abort", () => stalled && reject(new Error("The model stalled")))),
-                ]);
-            } finally {
-                clearInterval(watchdog);
-            }
-            if (stalled) throw new Error("The model stalled");
+            const raw = await this.chatGuarded(engine, messages, (soFar) => update({ text: "Writing the app…", lines: soFar.split("\n").length }), {
+                onRound: (i, of) => update({ text: `Reading the instructions (part ${i} of ${of})…` }),
+                maxTokens: 3000,
+                temperature,
+            });
             const answer = stripThinking(raw);
             const html = extractHtml(answer);
             if (!html) {
@@ -339,18 +317,7 @@ export class Controller {
             const summary = after.slice(0, 300) || (fences === 1 ? "The answer stopped before the end of the file." : "Done.");
             update({ text: summary, lines: html.split("\n").length, problems });
             this.setDraft(html);
-            if (this.useProbe) {
-                const testing = this.say("note", "Trying the app out: typing, clicking…");
-                const found = judgeProbe(await this.probe(html));
-                problems.push(...found);
-                const i = this.chat.findIndex((e) => e.id === testing.id);
-                if (i !== -1)
-                    this.chat[i] = {
-                        ...this.chat[i],
-                        text: found.length ? `Tried the app out: ${found.length === 1 ? "1 problem" : `${found.length} problems`}.` : "Tried the app out: it works.",
-                        problems: found,
-                    };
-            }
+            problems.push(...(await this.tryOut(html)));
             if (!this.best || problems.length < this.best.problems.length) this.best = { html, problems };
             if (!problems.length) return;
             if (attempt < MAX_ATTEMPTS) {
@@ -406,6 +373,112 @@ export class Controller {
                 this.abort = null;
             }
         }
+    }
+
+    /**
+     * One model call, aborted by the Stop button or by the watchdog: a hung GPU
+     * never answers and never reports an error. Throws "The model stalled" then.
+     */
+    private async chatGuarded(engine: Engine, messages: ChatMessage[], onText: (soFar: string) => void, opts: ChatOptions): Promise<string> {
+        const abort = this.abort!;
+        let lastProgress = Date.now();
+        let stalled = false;
+        const watchdog = setInterval(() => {
+            if (Date.now() - lastProgress < STALL_MS) return;
+            stalled = true;
+            abort.abort();
+        }, 5000);
+        try {
+            const raw = await Promise.race([
+                engine.chat(
+                    messages,
+                    (soFar) => {
+                        lastProgress = Date.now();
+                        onText(soFar);
+                    },
+                    {
+                        ...opts,
+                        signal: abort.signal,
+                        chunkChars: this.settings.chunks[engine.modelId] ?? FIRST_CHUNK,
+                        onRound: (i, of) => {
+                            lastProgress = Date.now();
+                            opts.onRound?.(i, of);
+                        },
+                    },
+                ),
+                // The engine may not even return after the abort; do not wait for it.
+                new Promise<never>((_, reject) => abort.signal.addEventListener("abort", () => stalled && reject(new Error("The model stalled")))),
+            ]);
+            if (stalled) throw new Error("The model stalled");
+            return raw;
+        } finally {
+            clearInterval(watchdog);
+        }
+    }
+
+    /**
+     * Settings-only mode (see skills.ts): the model fills in the template's
+     * settings, the code stays the template's. "code" when the request needs more
+     * (or anything goes wrong): the caller then has the model write code.
+     */
+    private async trySettings(template: Template, current: AppSettings, request: string): Promise<"done" | "stopped" | "code"> {
+        if (!this.engine || !this.useSettings) return "code";
+        const engine = this.engine;
+        this.busy = true;
+        this.abort = new AbortController();
+        const entry = this.say("model", `Filling in the ${template.label.toLowerCase()}'s settings…`);
+        const update = (patch: Partial<ChatEntry>): void => {
+            const i = this.chat.findIndex((e) => e.id === entry.id);
+            if (i !== -1) this.chat[i] = { ...this.chat[i], ...patch };
+        };
+        try {
+            const messages = buildSettingsMessages(template, current, request, this.userId);
+            this.lastPromptChars = messages.reduce((n, m) => n + m.content.length, 0);
+            const raw = await this.chatGuarded(engine, messages, () => undefined, { maxTokens: 500, temperature: 0.2 });
+            const settings = parseSettings(stripThinking(raw), template);
+            if (!settings) {
+                update({ text: "This needs more than the template's settings; writing code instead…" });
+                return "code";
+            }
+            const html = applySettings(template, settings);
+            const shown = Object.entries(settings)
+                .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
+                .join(" · ");
+            update({ text: `Set up the ${template.label.toLowerCase()} template, no code changed. ${shown}` });
+            if ((await this.tryOut(html)).length) {
+                this.say("note", "These settings break the app; writing code instead…");
+                return "code";
+            }
+            this.setDraft(html);
+            return "done";
+        } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (this.abort?.signal.aborted && !/stalled/.test(msg)) {
+                update({ text: msg, error: true });
+                return "stopped";
+            }
+            // A GPU loss included: the code path recovers from it.
+            update({ text: `Could not fill in the settings (${msg}); writing code instead…` });
+            return "code";
+        } finally {
+            this.busy = false;
+            this.abort = null;
+        }
+    }
+
+    /** The click-through test, with a note in the chat; the problems it found. */
+    private async tryOut(html: string): Promise<string[]> {
+        if (!this.useProbe) return [];
+        const testing = this.say("note", "Trying the app out: typing, clicking…");
+        const found = judgeProbe(await this.probe(html));
+        const i = this.chat.findIndex((e) => e.id === testing.id);
+        if (i !== -1)
+            this.chat[i] = {
+                ...this.chat[i],
+                text: found.length ? `Tried the app out: ${found.length === 1 ? "1 problem" : `${found.length} problems`}.` : "Tried the app out: it works.",
+                problems: found,
+            };
+        return found;
     }
 
     /** Uses the app once in a hidden sandbox (see probe.ts). */

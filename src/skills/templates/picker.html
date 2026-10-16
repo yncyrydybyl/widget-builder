@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Random picker</title>
+<title>Who's next?</title>
 <style>
   body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; text-align: center; }
   h1 { font-size: 18px; margin: 0 0 12px; }
@@ -13,7 +13,7 @@
 </style>
 </head>
 <body>
-<h1>Who's next?</h1>
+<h1 id="heading">Who's next?</h1>
 <textarea id="choices" aria-label="Choices, one per line">Anna
 Bob
 Carla</textarea>
@@ -21,6 +21,12 @@ Carla</textarea>
 <p id="result"></p>
 <p id="by"></p>
 <script>
+  // Settings: a new app of this kind changes only this line.
+  const SETTINGS = {"title":"Who's next?","choices":["Anna","Bob","Carla"],"button":"Pick one"};
+  document.getElementById("heading").textContent = SETTINGS.title;
+  document.getElementById("choices").value = SETTINGS.choices.join("\n");
+  document.getElementById("pick").textContent = SETTINGS.button;
+
   // The draw happens on the clicker's device and is shared, so everyone sees the same result.
   miniapp.on((ev) => {
     const d = ev.data || {};

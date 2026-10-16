@@ -8,6 +8,7 @@
 //   MODELS="Qwen2.5-Coder-1.5B-Instruct,Qwen3.5-4B" node test/real/bench.mjs
 //   HEADED=1 ...                                          # watch it
 //   REPEAT=3 TASKS=poll,list LABEL=baseline ...           # repeat, pick tasks, name the results file
+//   PARAMS="settings=0&probe=0" ...                       # widget parameters, to compare features
 //
 // Models are cached in test/real/.profile, so each downloads once. Results go to
 // test/real/bench-results.json and a table on stdout; each app's code and a
@@ -40,6 +41,7 @@ const ALL_TASKS = [
 ];
 const TASKS = process.env.TASKS ? ALL_TASKS.filter((t) => process.env.TASKS.split(",").includes(t.id)) : ALL_TASKS;
 const REPEAT = Number(process.env.REPEAT ?? 1);
+const PARAMS = Object.fromEntries(new URLSearchParams(process.env.PARAMS ?? ""));
 
 /** The options are there, and voting for the first one counts a vote. */
 function votes(options) {
@@ -142,7 +144,9 @@ const context = await chromium.launchPersistentContext("test/real/.profile", {
     channel: "chromium",
     headless: !process.env.HEADED,
     baseURL: "http://localhost:4184",
-    args: ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"],
+    // Headless Chrome otherwise may pick SwiftShader, WebGPU on the CPU: minutes per answer.
+    args: ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist", "--use-angle=vulkan"],
+    ignoreDefaultArgs: ["--use-angle=swiftshader-webgl"],
 });
 
 mkdirSync("test/real/bench", { recursive: true });
@@ -152,10 +156,13 @@ for (const model of models) {
     const result = { model, loaded: false, loadSeconds: null, tasks: [], resets: 0, error: null };
     results.push(result);
     const page = await context.newPage();
-    await page.addInitScript((model) => {
-        localStorage.setItem("widget-builder.settings", JSON.stringify({ modelId: model }));
-        window.__TEST_FIXTURE__ = { params: { matrix_user_id: "@alice:example.org" } };
-    }, model);
+    await page.addInitScript(
+        ([model, params]) => {
+            localStorage.setItem("widget-builder.settings", JSON.stringify({ modelId: model }));
+            window.__TEST_FIXTURE__ = { params: { ...params, matrix_user_id: "@alice:example.org" } };
+        },
+        [model, PARAMS],
+    );
     await page.goto("/__test__/index.html");
     const w = page.frameLocator("iframe");
     if (gpu === "unknown") {
@@ -182,7 +189,7 @@ for (const model of models) {
     }
 
     for (const task of TASKS.flatMap((t) => Array.from({ length: REPEAT }, (_, i) => ({ ...t, run: i + 1 })))) {
-        const r = { id: task.id, run: task.run, works: false, starts: false, fixes: 0, seconds: null, problem: null };
+        const r = { id: task.id, run: task.run, works: false, starts: false, fixes: 0, settingsOnly: false, seconds: null, problem: null };
         result.tasks.push(r);
         const t1 = Date.now();
         try {
@@ -200,6 +207,7 @@ for (const model of models) {
             const chat = (await w.locator(".chat li").allInnerTexts()).join("\n");
             result.resets += (chat.match(/The GPU reset/g) ?? []).length;
             r.fixes = (chat.match(/asking the model to fix|Asking the model to fix/g) ?? []).length;
+            r.settingsOnly = /no code changed/.test(chat) && !/Writing the app|writing code instead/.test(chat);
             // No preview at all: the last chat line says why (GPU, cut off, no code).
             if (!(await w.locator("iframe.app-frame").count())) throw new Error(`no app: ${chat.trim().split("\n").pop()}`);
             const runtime = await w.getByText("The app reported an error").count();
@@ -219,7 +227,7 @@ for (const model of models) {
         const name = `test/real/bench/${model}-${task.id}${REPEAT > 1 ? `-${task.run}` : ""}`;
         await w.locator("details pre").first().textContent({ timeout: 1000 }).then((html) => writeFileSync(`${name}.html`, html ?? ""), () => {});
         await page.screenshot({ path: `${name}.png`, fullPage: true }).catch(() => {});
-        console.log(`  ${`${task.id}${REPEAT > 1 ? ` #${task.run}` : ""}`.padEnd(13)} ${r.works ? "works" : r.starts ? "starts, broken" : "fails"}  ${r.seconds} s${r.fixes ? `, ${r.fixes} fix` : ""}${r.problem ? `  (${r.problem})` : ""}`);
+        console.log(`  ${`${task.id}${REPEAT > 1 ? ` #${task.run}` : ""}`.padEnd(13)} ${r.works ? "works" : r.starts ? "starts, broken" : "fails"}  ${r.seconds} s${r.settingsOnly ? ", settings only" : ""}${r.fixes ? `, ${r.fixes} fix` : ""}${r.problem ? `  (${r.problem})` : ""}`);
     }
     await w.getByRole("button", { name: "Unload" }).click().catch(() => {});
     await page.close();

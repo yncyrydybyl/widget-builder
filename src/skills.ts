@@ -24,6 +24,12 @@ export interface Template {
     /** Words in a request that make this template the starting point. */
     keywords: string[];
     html: string;
+    /**
+     * What the app does, for settings-only mode: the model fills in the template's
+     * SETTINGS line instead of writing code. One field description per setting.
+     */
+    does?: string;
+    fields?: Record<string, string>;
 }
 
 export const TEMPLATES: Template[] = [
@@ -32,42 +38,56 @@ export const TEMPLATES: Template[] = [
         label: "Poll",
         keywords: ["poll", "vote", "voting", "survey", "umfrage", "abstimmung", "abstimmen", "choose", "option", "rating", "rate", "bewertung"],
         html: poll,
+        does: "Each person votes for one of a fixed list of options and can change their vote. It shows the counts and who voted.",
+        fields: { title: "a short name for the app", question: "the question people vote on", options: "the answers to choose from, 2 to 12" },
     },
     {
         id: "checklist",
         label: "Checklist",
         keywords: ["list", "todo", "to-do", "task", "checklist", "shopping", "packing", "liste", "aufgabe", "einkauf", "agenda", "items", "bring"],
         html: checklist,
+        does: "Everyone adds items to one shared list, ticks them off and removes them. It shows who added each item.",
+        fields: { title: "the heading", placeholder: "the hint in the text field, e.g. \"New item\"", button: "the label of the add button" },
     },
     {
         id: "kanban",
         label: "Kanban board",
         keywords: ["kanban", "board", "trello", "columns", "column", "backlog", "sprint", "workflow", "spalten"],
         html: kanban,
+        does: "Everyone adds cards to the first column, moves cards between the columns with arrow buttons and removes them.",
+        fields: { title: "the heading", placeholder: "the hint in the text field, e.g. \"New card\"", columns: "the column names, left to right, 2 to 6" },
     },
     {
         id: "picker",
         label: "Random picker",
         keywords: ["random", "pick", "picker", "dice", "draw", "lottery", "wheel", "spin", "zufall", "zufällig", "würfel", "würfeln", "auslosen", "losen", "glücksrad", "rad", "drehen", "roulette", "who's next", "shuffle"],
         html: picker,
+        does: "A list of names or choices that anyone can edit; a button picks one at random and everyone sees the same result.",
+        fields: { title: "the heading, e.g. the question that is decided", choices: "the names or choices to pick from", button: "the label of the button" },
     },
     {
         id: "scoreboard",
         label: "Scoreboard",
         keywords: ["score", "points", "scoreboard", "leaderboard", "game", "counter", "tally", "punkte", "punktestand", "spiel", "zähler", "tournament", "turnier"],
         html: scoreboard,
+        does: "Anyone adds players or teams and gives or takes points with + and − buttons; sorted by points.",
+        fields: { title: "the heading", placeholder: "the hint in the name field, e.g. \"Player or team\"" },
     },
     {
         id: "countdown",
         label: "Countdown",
         keywords: ["countdown", "timer", "deadline", "until", "release", "date", "clock", "frist"],
         html: countdown,
+        does: "Counts down the days, hours, minutes and seconds to one date and time. Anyone can set a new date and name.",
+        fields: { title: "what is counted down to", target: "the date and time, as YYYY-MM-DDTHH:MM" },
     },
     {
         id: "sketch",
         label: "Drawing",
         keywords: ["sketch", "draw", "drawing", "paint", "painting", "canvas", "whiteboard", "doodle", "postcard", "postcards", "pictionary", "zeichnen", "zeichnung", "malen", "skizze", "postkarte", "tafel"],
         html: sketch,
+        does: "A shared drawing canvas that everyone draws on with a few colours, and a Clear button.",
+        fields: { title: "the heading", colors: "the pen colours, as #rrggbb, 2 to 8" },
     },
     { id: "blank", label: "Blank", keywords: [], html: blank },
 ];
@@ -128,5 +148,113 @@ export function buildMessages(task: Task, sender: string): ChatMessage[] {
     return [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: `${parts.join("\n\n")}\n\nRequest from ${name}: ${request}` },
+    ];
+}
+
+/*
+ * Settings-only mode. A template-shaped request ("a lunch poll: pizza, sushi or
+ * salad") needs no new code: the model fills in the template's SETTINGS line,
+ * the code stays the tested template. Asks for a few lines of JSON instead of a
+ * whole file, so it is faster and cannot break the app. Requests that need more
+ * than the settings allow get {"custom": true} and go to the code path.
+ */
+export type Settings = Record<string, string | string[]>;
+
+const SETTINGS_LINE = /^( *)const SETTINGS = (\{.*\});$/m;
+
+/** A template's settings, parsed from its SETTINGS line. */
+export function defaultSettings(t: Template): Settings | null {
+    if (!t.fields) return null;
+    const m = SETTINGS_LINE.exec(t.html);
+    return m ? (JSON.parse(m[2]) as Settings) : null;
+}
+
+const escapeHtml = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** The template with these settings, and its <title> set to match. */
+export function applySettings(t: Template, settings: Settings): string {
+    // "<" escaped, so a value never closes the script.
+    const json = JSON.stringify(settings).replace(/</g, "\\u003c");
+    return t.html
+        .replace(SETTINGS_LINE, (_, indent: string) => `${indent}const SETTINGS = ${json};`)
+        .replace(/<title>[^<]*<\/title>/i, `<title>${escapeHtml(String(settings.title ?? t.label))}</title>`);
+}
+
+/** The template an app is, with its settings, when nothing but the settings was changed. */
+export function settingsOf(html: string): { template: Template; settings: Settings } | null {
+    const m = SETTINGS_LINE.exec(html);
+    if (!m) return null;
+    const blank = (h: string): string => h.replace(SETTINGS_LINE, "").replace(/<title>[^<]*<\/title>/i, "");
+    const template = TEMPLATES.find((t) => t.fields && blank(t.html) === blank(html));
+    if (!template) return null;
+    try {
+        return { template, settings: JSON.parse(m[2]) as Settings };
+    } catch {
+        return null;
+    }
+}
+
+const isColor = (s: string): boolean => /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(s);
+
+/**
+ * The settings from the model's answer, checked against the template's: the same
+ * keys with the same kinds of values. Null for {"custom": true} or anything unusable.
+ */
+export function parseSettings(answer: string, t: Template): Settings | null {
+    const defaults = defaultSettings(t);
+    if (!defaults) return null;
+    const block = /```(?:json)?\s*([\s\S]*?)```/.exec(answer)?.[1] ?? answer;
+    const start = block.indexOf("{");
+    const end = block.lastIndexOf("}");
+    if (start === -1 || end < start) return null;
+    let raw: Record<string, unknown>;
+    try {
+        raw = JSON.parse(block.slice(start, end + 1)) as Record<string, unknown>;
+    } catch {
+        return null;
+    }
+    if (!raw || typeof raw !== "object" || raw.custom) return null;
+    const out: Settings = {};
+    for (const [key, fallback] of Object.entries(defaults)) {
+        const v = raw[key];
+        if (v === undefined) out[key] = fallback;
+        else if (Array.isArray(fallback)) {
+            if (!Array.isArray(v)) return null;
+            const items = [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean))].map((x) => x.slice(0, 80));
+            if (items.length < (key === "choices" ? 1 : 2) || items.length > 20) return null;
+            if (key === "colors" && !items.every(isColor)) return null;
+            out[key] = items;
+        } else {
+            if (typeof v !== "string" || !v.trim()) return null;
+            if (key === "target" && isNaN(new Date(v).getTime())) return null;
+            out[key] = v.trim().slice(0, 120);
+        }
+    }
+    return out;
+}
+
+/** The short prompt for settings-only mode: what the app does, its settings, the request. */
+export function buildSettingsMessages(t: Template, current: Settings, request: string, sender: string, today = new Date()): ChatMessage[] {
+    const name = /^@([^:]+)/.exec(sender)?.[1] ?? sender;
+    const fields = Object.entries(t.fields ?? {})
+        .map(([k, v]) => `- ${k}: ${v}`)
+        .join("\n");
+    return [
+        {
+            role: "system",
+            content: "You set up ready-made apps for a chat room. Reply with ONE JSON object in a ```json code block and nothing else.",
+        },
+        {
+            role: "user",
+            content:
+                `The ${t.label.toLowerCase()} app. What it does: ${t.does}\n\n` +
+                `Its settings now:\n\`\`\`json\n${JSON.stringify(current, null, 1)}\n\`\`\`\n\n` +
+                `The settings:\n${fields}\n\n` +
+                `Today is ${today.toISOString().slice(0, 10)}.\n\n` +
+                `Request from ${name}: ${request}\n\n` +
+                "If this app does what is asked once its settings are changed, reply with the settings changed to fit the request, with the same keys. " +
+                "Write the texts in the language of the request. " +
+                'If the request needs anything the app cannot do (another feature, other buttons, other behaviour), reply with {"custom": true}.',
+        },
     ];
 }

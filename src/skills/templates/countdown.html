@@ -25,8 +25,10 @@
 </form>
 <script>
   // The target is shared: whoever sets it last decides, and everyone counts down to it.
-  let target = new Date("2026-12-01T09:00:00").getTime();
-  let label = "Release";
+  // Settings: a new app of this kind changes only the SETTINGS line.
+  const SETTINGS = {"title":"Release","target":"2026-12-01T09:00"};
+  let target = new Date(SETTINGS.target).getTime();
+  let label = SETTINGS.title;
 
   miniapp.on((ev) => {
     const d = ev.data || {};

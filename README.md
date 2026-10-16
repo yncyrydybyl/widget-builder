@@ -87,6 +87,8 @@ pnpm test                                   # vitest: app format, extraction, ch
 pnpm test:e2e                               # Playwright, mock host, echo engine: build, preview,
                                             # publish, run, sandbox isolation, runner mode
 HEADED=1 node test/real/build.mjs [model]   # real model on your GPU (after pnpm build)
+node test/real/bench.mjs                    # which model is best on this machine: builds four apps
+                                            # per model, clicks and types in them, ranks the models
 ```
 
 ## Icon

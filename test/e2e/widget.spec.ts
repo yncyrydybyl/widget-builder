@@ -264,6 +264,7 @@ test("every template passes the click-through test", async ({ page }) => {
         "a scoreboard for our game",
         "a countdown to the release",
         "a sketch pad",
+        "tic-tac-toe for two players",
         "a guestbook",
     ];
     for (const request of requests) {
@@ -463,4 +464,84 @@ test("a page sized from its frame (100vh) does not make the frame grow without e
     await expect(w.frameLocator("iframe.app-frame").getByRole("heading", { name: "Tall" })).toBeVisible();
     await page.waitForTimeout(1500);
     expect((await w.locator("iframe.app-frame").boundingBox())!.height).toBeLessThan(500);
+});
+
+test("a board of clickable <div>s that shares nothing is caught by the click-through test", async ({ page }) => {
+    // From a real session: the squares are <div>s with click handlers, and moves never reach the room.
+    const local = `<!doctype html><html><head><title>Tic Tac Toe</title><style>
+      .board { display: grid; grid-template-columns: repeat(3, 60px); gap: 6px; } .cell { height: 60px; border: 1px solid; cursor: pointer; }
+    </style></head><body><h1>Tic Tac Toe</h1><div id="log"></div><div class="board">
+      ${Array.from({ length: 9 }, (_, i) => `<div class="cell" data-i="${i}"></div>`).join("")}
+    </div><script>
+      const board = ["", "", "", "", "", "", "", "", ""];
+      let player = "X";
+      document.querySelectorAll(".cell").forEach((cell) => cell.addEventListener("click", () => {
+        if (board[cell.dataset.i]) return;
+        board[cell.dataset.i] = cell.textContent = player;
+        player = player === "X" ? "O" : "X";
+      }));
+      miniapp.on((ev) => {});
+    </script></body></html>`;
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("ttt", local, "Tic Tac Toe")] });
+    await w.getByRole("button", { name: "Load model" }).click();
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await w.getByRole("button", { name: "Edit" }).click();
+    await w.getByRole("textbox", { name: "Change" }).fill("make it nicer");
+    await w.getByRole("button", { name: "Change app" }).click();
+    await expect(w.locator('main[data-busy="false"]')).toBeVisible({ timeout: 30_000 });
+    await expect(w.getByText(/Nothing in the app calls miniapp.send/).first()).toBeVisible();
+    await expect(w.getByText("Tried the app out: it works.")).toHaveCount(0);
+});
+
+test("the board game template is a real two-player game", async ({ page, context }) => {
+    const game = readFileSync(new URL("../../src/skills/templates/game.html", import.meta.url), "utf8");
+    const BOB = "@bob:example.org";
+    const players = [
+        { user: ME, page, seen: 0 },
+        { user: BOB, page: await context.newPage(), seen: 0 },
+        { user: "@carol:example.org", page: await context.newPage(), seen: 0 },
+    ];
+    for (const p of players) await open(p.page, { params: { engine: "echo", matrix_user_id: p.user, app: "game" }, state: [appState("game", game, "Game")] });
+    const app = (i: number) => players[i].page.frameLocator("iframe").frameLocator("iframe.app-frame");
+    // Every action a player sends reaches the others, as in a room.
+    const relay = async () => {
+        for (const from of players) {
+            const out = (await sent(from.page)).filter((e) => e.type === EVENT);
+            for (const e of out.slice(from.seen)) {
+                const ev = action(`$${from.user.slice(1, 4)}-${++from.seen}`, "game", e.content.data, from.user, Date.now());
+                for (const to of players) if (to !== from) await push(to.page, ev);
+            }
+        }
+    };
+    const actions = async (i: number) => (await sent(players[i].page)).filter((e) => e.type === EVENT).length;
+    const play = async (i: number, square: number) => {
+        const before = await actions(i);
+        await app(i).getByRole("button", { name: new RegExp(`^Square ${square}$`) }).click();
+        await expect.poll(() => actions(i)).toBe(before + 1);
+        await relay();
+    };
+    await expect(app(0).getByText("Click a square to play ❌.")).toBeVisible();
+    await play(0, 1);
+    await expect(app(1).getByText("alice's turn.")).toHaveCount(0);
+    await expect(app(1).getByText("Click a square to play ⭕.")).toBeVisible();
+    // Not alice's turn: her squares are disabled.
+    await expect(app(0).getByRole("button", { name: /^Square 2$/ })).toBeDisabled();
+    await play(1, 4);
+    await expect(app(2).getByText("alice's turn.")).toBeVisible();
+    // Carol only watches.
+    await expect(app(2).getByRole("button", { name: /^Square 2$/ })).toBeDisabled();
+    // A move sent out of turn anyway is ignored on every screen.
+    await push(page, action("$cheat", "game", { move: 8 }, BOB, Date.now()));
+    await play(0, 2);
+    await play(1, 5);
+    await play(0, 3);
+    for (const i of [0, 1, 2]) {
+        await expect(app(i).getByText("🏆 alice wins!")).toBeVisible();
+        await expect(app(i).locator("#board button.win")).toHaveCount(3);
+        await expect(app(i).getByRole("button", { name: /^Square 9/ })).toHaveAccessibleName("Square 9");
+    }
+    await app(1).getByRole("button", { name: "New game" }).click();
+    await expect.poll(() => actions(1)).toBe(3);
+    await relay();
+    for (const i of [0, 1, 2]) await expect(app(i).getByText("Click a square to play ❌.")).toBeVisible();
 });

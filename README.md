@@ -31,7 +31,7 @@ change to it. **undo** goes back a version, and **new app** starts over.
 | Part | What it is |
 |---|---|
 | Model | WebLLM on WebGPU, in a worker, with an 8k context window. Qwen 2.5 Coder 1.5B is the default and runs on integrated GPUs; 3B, Qwen 3.5 4B and 7B are offered for dedicated GPUs. |
-| Skills | `src/skills/`: the miniapp API, the rules, and eight working templates (poll, checklist, kanban board, random picker, scoreboard, countdown, drawing, blank). A new app always starts from the closest template; small models adapt working code much better than they write from scratch. |
+| Skills | `src/skills/`: the miniapp API, the rules, and nine working templates (poll, checklist, board game for two, kanban board, random picker, scoreboard, countdown, drawing, blank). A new app always starts from the closest template; small models adapt working code much better than they write from scratch. |
 | Checks | Before an app runs, it is checked for network use, external files, browser storage, `alert` and a cut-off file. Problems go back to the model once, automatically. So does an error the preview reports when the app starts; after that, the "Ask the model to fix it" button does it. |
 | Sandbox | Apps run in `sandbox.html` inside `<iframe sandbox="allow-scripts">`: an opaque origin with its own CSP (inline code only, **no network**). An app cannot reach the widget, the user's account or storage. |
 | Bridge | `window.miniapp` (`ready`, `send`, `on`, `displayName`, `avatar`, `color`), injected in front of the app's code with the base styles (see "How apps look"). The builder adds the real sender to every event, so an app cannot act as someone else. |

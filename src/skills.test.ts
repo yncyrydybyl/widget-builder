@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { TEMPLATES, applySettings, buildSettingsMessages, checkSettings, defaultSettings, parseSettings, settingsOf } from "./skills";
+import { TEMPLATES, applySettings, buildSettingsMessages, checkSettings, defaultSettings, parseSettings, pickTemplate, settingsOf } from "./skills";
 import { titleOf, withAccent } from "./apps";
 
 const poll = TEMPLATES.find((t) => t.id === "poll")!;
@@ -43,9 +43,10 @@ describe("settings-only mode", () => {
     });
 
     it("still knows apps built from the templates of 0.1 and 0.2, and upgrades them when their settings change", () => {
-        for (const t of TEMPLATES.filter((t) => t.fields)) {
-            const old = readFileSync(`test/fixtures/templates-0.1/${t.id}.html`, "utf8").replace("Lunch poll", "Team poll");
-            const found = settingsOf(withAccent(old, "#2f6fde"));
+        const old = ["poll", "checklist", "kanban", "picker", "scoreboard", "countdown", "sketch"];
+        for (const t of TEMPLATES.filter((t) => old.includes(t.id))) {
+            const html = readFileSync(`test/fixtures/templates-0.1/${t.id}.html`, "utf8").replace("Lunch poll", "Team poll");
+            const found = settingsOf(withAccent(html, "#2f6fde"));
             expect(found?.template.id, t.id).toBe(t.id);
             expect(Object.keys(found!.settings).sort()).toEqual(Object.keys(defaultSettings(t)!).sort());
             // Applying settings writes the current template.
@@ -54,6 +55,14 @@ describe("settings-only mode", () => {
         // Changed code is not the template, old or new.
         const poll0 = readFileSync("test/fixtures/templates-0.1/poll.html", "utf8");
         expect(settingsOf(poll0.replace("render();", "render(); render();"))).toBeNull();
+    });
+
+    it("picks the board game for two-player requests, and takes numbers as settings", () => {
+        for (const r of ["Tic-tac-toe for two players in the room", "tic tac toe", "Ein Spiel: drei gewinnt", "gomoku on a 9x9 board"]) expect(pickTemplate(r).id, r).toBe("game");
+        expect(pickTemplate("a kanban board for the sprint").id).toBe("kanban");
+        expect(pickTemplate("a scoreboard for our game").id).toBe("scoreboard");
+        const game = TEMPLATES.find((t) => t.id === "game")!;
+        expect(parseSettings('{"title": "Gomoku", "marks": ["⚫", "⚪"], "size": 9, "line": 5}', game)).toEqual({ title: "Gomoku", marks: ["⚫", "⚪"], size: "9", line: "5" });
     });
 
     it("checks settings from the form and says what is wrong", () => {

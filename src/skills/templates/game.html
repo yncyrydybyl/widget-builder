@@ -1,0 +1,118 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tic-tac-toe</title>
+<style>
+  #board { display: grid; gap: 6px; max-width: 360px; margin: 0 auto 14px; }
+  #board button { aspect-ratio: 1; min-height: 0; padding: 0; font-size: 28px; background: var(--card); color: var(--fg); border-color: var(--line); }
+  #board button.win { background: var(--accent); color: var(--accent-fg); }
+  #board button:disabled { opacity: 1; }
+  #seats { justify-content: center; }
+  .seat { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); }
+  .seat.turn { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+</style>
+</head>
+<body>
+<h1 id="heading">Tic-tac-toe</h1>
+<div class="row" id="seats"></div>
+<p class="center" id="status"></p>
+<div id="board"></div>
+<p class="center"><button class="secondary" id="again">New game</button></p>
+<script>
+  // Settings: a new app of this kind changes only this line.
+  const SETTINGS = {"title":"Tic-tac-toe","marks":["❌","⭕"],"size":"3","line":"3"};
+  const SIZE = Math.max(3, Math.min(9, Number(SETTINGS.size) || 3));
+  const LINE = Math.max(3, Math.min(SIZE, Number(SETTINGS.line) || 3));
+  const MARKS = SETTINGS.marks;
+  document.getElementById("heading").textContent = SETTINGS.title;
+
+  // The game is rebuilt from the actions in order, the same way on every screen.
+  // The first person to move plays MARKS[0], the next other person MARKS[1].
+  let players, cells, turn, winner, line;
+  function newGame() {
+    players = [null, null];
+    cells = Array(SIZE * SIZE).fill(-1); // -1 empty, else the player's index
+    turn = 0;
+    winner = null; // a player's index, or "draw"
+    line = [];
+  }
+  newGame();
+
+  /** Whether this person may put their mark on this square now. */
+  function canMove(user, i) {
+    if (winner !== null || cells[i] !== -1) return false;
+    const seat = players[turn];
+    return seat ? seat === user : !players.includes(user);
+  }
+
+  miniapp.on((ev) => {
+    const d = ev.data || {};
+    if (d.again && (players.includes(ev.sender) || !players[0])) newGame();
+    if (typeof d.move === "number" && d.move >= 0 && d.move < cells.length && canMove(ev.sender, d.move)) {
+      players[turn] = ev.sender;
+      cells[d.move] = turn;
+      line = findLine(d.move);
+      if (line.length) winner = turn;
+      else if (!cells.includes(-1)) winner = "draw";
+      else turn = 1 - turn;
+    }
+    render();
+  });
+
+  /** The winning squares through square i, if its mark completes a line. */
+  function findLine(i) {
+    const p = cells[i], r = Math.floor(i / SIZE), c = i % SIZE;
+    for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+      const run = [i];
+      for (const s of [1, -1]) {
+        for (let k = 1; ; k++) {
+          const rr = r + dr * k * s, cc = c + dc * k * s;
+          if (rr < 0 || rr >= SIZE || cc < 0 || cc >= SIZE || cells[rr * SIZE + cc] !== p) break;
+          run.push(rr * SIZE + cc);
+        }
+      }
+      if (run.length >= LINE) return run;
+    }
+    return [];
+  }
+
+  document.getElementById("again").onclick = () => miniapp.send({ again: true });
+
+  function render() {
+    const me = miniapp.user.id;
+    const seats = document.getElementById("seats");
+    seats.textContent = "";
+    players.forEach((p, i) => {
+      const seat = document.createElement("span");
+      seat.className = "seat row" + (winner === null && turn === i ? " turn" : "");
+      if (p) seat.append(miniapp.avatar(p));
+      seat.append(MARKS[i] + " " + (p ? miniapp.displayName(p) + (p === me ? " (you)" : "") : "open seat"));
+      seats.append(seat);
+    });
+    const status = document.getElementById("status");
+    if (winner === "draw") status.textContent = "It's a draw.";
+    else if (winner !== null) status.textContent = "🏆 " + miniapp.displayName(players[winner]) + " wins!";
+    else if (players[turn] === me) status.textContent = "Your turn.";
+    else if (players[turn]) status.textContent = miniapp.displayName(players[turn]) + "'s turn.";
+    else if (players.includes(me)) status.textContent = "Waiting for someone to play " + MARKS[turn] + ".";
+    else status.textContent = "Click a square to play " + MARKS[turn] + ".";
+
+    const board = document.getElementById("board");
+    board.style.gridTemplateColumns = "repeat(" + SIZE + ", 1fr)";
+    board.textContent = "";
+    cells.forEach((p, i) => {
+      const b = document.createElement("button");
+      b.textContent = p === -1 ? "" : MARKS[p];
+      b.className = line.includes(i) ? "win" : "";
+      b.setAttribute("aria-label", "Square " + (i + 1) + (p === -1 ? "" : ", " + MARKS[p]));
+      b.disabled = !canMove(me, i);
+      b.onclick = () => miniapp.send({ move: i });
+      board.append(b);
+    });
+  }
+
+  miniapp.ready(render);
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@ import rules from "./skills/rules.md?raw";
 import blank from "./skills/templates/blank.html?raw";
 import checklist from "./skills/templates/checklist.html?raw";
 import countdown from "./skills/templates/countdown.html?raw";
+import game from "./skills/templates/game.html?raw";
 import kanban from "./skills/templates/kanban.html?raw";
 import picker from "./skills/templates/picker.html?raw";
 import poll from "./skills/templates/poll.html?raw";
@@ -49,6 +50,19 @@ export const TEMPLATES: Template[] = [
         html: checklist,
         does: "Everyone adds items to one shared list, ticks them off and removes them. It shows who added each item.",
         fields: { title: "the heading", placeholder: "the hint in the text field, e.g. \"New item\"", button: "the label of the add button" },
+    },
+    {
+        id: "game",
+        label: "Board game for two",
+        keywords: ["tic-tac-toe", "tictactoe", "tic", "tac", "toe", "noughts", "crosses", "gomoku", "five in a row", "board game", "two players", "2 players", "opponent", "tris", "drei gewinnt", "tic tac toe"],
+        html: game,
+        does: "Two people take turns putting their mark on an empty square of a square board; whoever first has enough marks in a row (across, down or diagonally) wins, a full board is a draw. The first person to move plays the first mark, the next other person the second; everyone else watches. A New game button starts over.",
+        fields: {
+            title: "the heading",
+            marks: "the two players' marks, usually emoji, e.g. ❌ and ⭕",
+            size: "the board's width and height, 3 to 9",
+            line: "how many marks in a row win, 3 up to the size",
+        },
     },
     {
         id: "kanban",
@@ -265,9 +279,11 @@ export function checkSettings(raw: Record<string, unknown>, t: Template): Settin
             if (key === "colors" && !items.every(isColor)) return `"${key}" must be colours written as #rrggbb.`;
             out[key] = items;
         } else {
-            if (typeof v !== "string" || !v.trim()) return `"${key}" must not be empty.`;
-            if (key === "target" && isNaN(new Date(v).getTime())) return `"${key}" must be a date and time.`;
-            out[key] = v.trim().slice(0, 120);
+            // Models write numbers as numbers ("size": 5); the settings keep them as text.
+            const text = typeof v === "number" && isFinite(v) ? String(v) : v;
+            if (typeof text !== "string" || !text.trim()) return `"${key}" must not be empty.`;
+            if (key === "target" && isNaN(new Date(text).getTime())) return `"${key}" must be a date and time.`;
+            out[key] = text.trim().slice(0, 120);
         }
     }
     return out;

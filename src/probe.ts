@@ -112,6 +112,12 @@ export const PROBE = `(() => {
     }
     const buttons = [...document.querySelectorAll("button, input[type=button]")].filter((b) => visible(b) && !used.has(b)).slice(0, 6);
     for (const b of buttons) if (b.isConnected && visible(b)) await step("click '" + name(b) + "'", "click", () => b.click());
+    // Things made clickable without being buttons (a board of <div> squares): a person clicks those too.
+    const clickable = (el) => el.onclick || el.getAttribute("role") === "button" || getComputedStyle(el).cursor === "pointer";
+    const others = [...document.querySelectorAll("body *")]
+      .filter((el) => !el.closest("button, a, label, input, select, textarea, canvas") && visible(el) && clickable(el) && !(el.parentElement && clickable(el.parentElement)))
+      .slice(0, 6);
+    for (const el of others) if (el.isConnected && visible(el)) await step("click '" + name(el) + "'", "click", () => el.click());
     const canvas = [...document.querySelectorAll("canvas")].find(visible);
     if (canvas) {
       await step("draw on the canvas", "draw", async () => {

@@ -63,6 +63,8 @@ async function text(app) {
 /** Types into the app's text field, submits, and expects the text on the page. */
 async function addsText(app) {
     const input = app.locator('input[type="text"], input:not([type]), textarea').first();
+    // Some apps show their text field only after a click ("Add message").
+    if (!(await input.count())) await app.locator("button").first().click({ timeout: 3000 });
     await input.fill(TOKEN, { timeout: 3000 });
     await input.press("Enter");
     if (!(await shows(app))) {

@@ -114,9 +114,9 @@ export async function connect(
         api.transport.reply(ev.detail, {});
     };
 
-    // Room state arrives here: the full set right after approval, then every
-    // change. Prefer this over readStateEvents — the Player answers that from
-    // the last 50 timeline events, so old state scrolls out.
+    // Room state changes arrive here. Element also pushes the full set right
+    // after approval; the Player does not, so the controller reads it once too
+    // (readStateEvents, which the Player answers from recent timeline events).
     api.on(`action:${WidgetApiToWidgetAction.UpdateState}`, (ev: CustomEvent<IWidgetApiRequest>) => {
         ack(ev);
         const state = (ev.detail.data as { state?: IRoomEvent[] }).state ?? [];

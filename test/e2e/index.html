@@ -23,6 +23,7 @@
              *   denySend: true,                        // refuse an MSC2974 renegotiation
              *   state:    [ { type, state_key, content, sender, … } ],  // pushed as update_state
              *   events:   [ … ],                       // answer to read_events (filtered by type/msgtype like a host)
+             *   noInitialState: true,                // like the Player: push state changes only, not the state already there
              *   bodies:   { "mxc://…": "<base64>" },   // answers to download_file
              *   widgetPath: "/index.html",
              * };
@@ -86,7 +87,7 @@
                         toWidget("notify_capabilities", { approved: approvedSet, requested: m.response.capabilities });
                         // Like a real host: initial room state, only what approved
                         // receive.state_event:<type>[#<state_key>] filters allow.
-                        if (approvedSet.some((c) => c.startsWith("org.matrix.msc2762.receive.state_event:"))) {
+                        if (!fixture.noInitialState && approvedSet.some((c) => c.startsWith("org.matrix.msc2762.receive.state_event:"))) {
                             toWidget("update_state", { state: allowedState(fixture.state ?? []) });
                         }
                     }
@@ -141,7 +142,12 @@
                                 (e) =>
                                     (!m.data.type || e.type === m.data.type) &&
                                     (!m.data.msgtype || e.content?.msgtype === m.data.msgtype) &&
-                                    (m.data.state_key === undefined || e.state_key === m.data.state_key),
+                                    // state_key true: any state event of the type (readStateEvents without a key).
+                                    (m.data.state_key === undefined
+                                        ? e.state_key === undefined
+                                        : m.data.state_key === true
+                                          ? e.state_key !== undefined
+                                          : e.state_key === m.data.state_key),
                             ),
                         });
                         break;

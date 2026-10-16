@@ -100,6 +100,19 @@ test("builds an app from a template, previews it locally and publishes it", asyn
     expect((await sent(page)).filter((e) => e.type === WIDGETS).at(-1)).toEqual({ type: WIDGETS, state_key: "widget_builder_lunch-poll", content: {} });
 });
 
+test("lists the room's apps on a host that pushes only state changes, like the Player", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, noInitialState: true, events: [appState("lunch", poll)] });
+    await expect(w.getByRole("button", { name: "Apps (1)" })).toBeVisible();
+    // A pushed change wins over the read, and later reads cannot undo it.
+    await page.evaluate((e) => (window as unknown as { __pushState: (s: unknown[]) => void }).__pushState(e), [{ ...appState("lunch", poll, "Dinner poll"), event_id: "$v2" }]);
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await expect(w.getByText("Dinner poll")).toBeVisible();
+
+    // A room widget reads its one app the same way.
+    const r = await open(page, { params: { engine: "echo", matrix_user_id: ME, app: "lunch" }, noInitialState: true, events: [appState("lunch", poll)] });
+    await expect(r.frameLocator("iframe.app-frame").getByText("Where do we have lunch?")).toBeVisible();
+});
+
 test("a template-shaped request only fills in the settings; more than that goes to code", async ({ page }) => {
     const w = await open(page, { params: { engine: "echo", matrix_user_id: ME } });
     await w.getByRole("button", { name: "Load model" }).click();

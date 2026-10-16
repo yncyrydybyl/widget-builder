@@ -70,6 +70,9 @@ function loadSettings(): Settings {
     }
 }
 
+/** One state slot: its type and state key. */
+const stateId = (ev: IRoomEvent): string => `${ev.type}\u0000${(ev as IRoomEvent & { state_key?: string }).state_key ?? ""}`;
+
 export class Controller {
     readonly params: Params = readParams();
     readonly userId: string = this.params.get("matrix_user_id") ?? this.params.get("userId") ?? LOCAL_USER;
@@ -119,6 +122,8 @@ export class Controller {
     private lastPromptChars = 0;
     /** The best version so far of the app being built, by number of problems found. */
     private best: { html: string; problems: string[] } | null = null;
+    /** State slots the host has pushed; a later read of older state must not undo them. */
+    private readonly pushed = new Set<string>();
     /** `#/?probe=0` turns the click-through test off (for tests of the plain flow). */
     readonly useProbe = this.params.get("probe") !== "0";
     /** `#/?settings=0`: always write code, even for a request a template's settings cover. */
@@ -174,6 +179,17 @@ export class Controller {
             return;
         }
         this.room = "ready";
+        // The Player pushes only state changes, not the state already there, so
+        // read that once. A push for the same key wins: it is newer.
+        try {
+            const types = this.runnerOnly ? [[APP_TYPE, this.runnerOnly]] : [[APP_TYPE], [WIDGET_TYPE]];
+            for (const [type, key] of types) {
+                const found = await this.api.readStateEvents(type, 100, key);
+                this.onState(found.filter((ev) => !this.pushed.has(stateId(ev))), false);
+            }
+        } catch {
+            /* pushes only */
+        }
         try {
             for (const ev of await this.api.readRoomEvents(EVENT_TYPE, 100)) this.onEvent(ev);
         } catch {
@@ -181,9 +197,10 @@ export class Controller {
         }
     }
 
-    private onState(events: IRoomEvent[]): void {
+    private onState(events: IRoomEvent[], pushed = true): void {
         for (const ev of events) {
             const key = (ev as IRoomEvent & { state_key?: string }).state_key;
+            if (pushed) this.pushed.add(stateId(ev));
             if (ev.type === WIDGET_TYPE) {
                 const app = appOfRoomWidget(key ?? "");
                 if (!app) continue;

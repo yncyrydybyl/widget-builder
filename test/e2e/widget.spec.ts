@@ -318,7 +318,7 @@ test("edits a published app's settings without a model, previewing with the room
     // Settings that do not fit the template are refused with the reason.
     await w.getByRole("textbox", { name: "options" }).fill("Pizza\n\n");
     await w.getByRole("button", { name: "Apply settings" }).click();
-    await expect(w.getByText('"options" needs 2 to 20 entries.')).toBeVisible();
+    await expect(w.getByText('"options" needs 2 to 12 entries.')).toBeVisible();
 
     await w.getByRole("textbox", { name: "options" }).fill("Pizza\nSushi\nPasta");
     await w.getByRole("button", { name: "Apply settings" }).click();
@@ -425,6 +425,8 @@ test("removing an app or editing over an unpublished draft asks first", async ({
     await w.getByRole("button", { name: "Edit" }).click();
     await expect(w.getByText(/Your draft in Build is not published/)).toBeVisible();
     await w.getByRole("button", { name: "cancel" }).click();
+    // A link, not a red button (0.3.0 drew it as one).
+    await expect(w.getByRole("button", { name: "remove" })).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await w.getByRole("button", { name: "remove" }).click();
     // An open "remove" question is not a yes to editing.
     await w.getByRole("button", { name: "Edit" }).click();

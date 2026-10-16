@@ -73,7 +73,14 @@ describe("settings-only mode", () => {
             options: ["Pizza", "Sushi"],
         });
         expect(checkSettings({ title: "Lunch", question: "  ", options: ["A", "B"] }, poll)).toBe('"question" must not be empty.');
-        expect(checkSettings({ title: "Lunch", question: "Where?", options: ["Pizza", ""] }, poll)).toBe('"options" needs 2 to 20 entries.');
+        expect(checkSettings({ title: "Lunch", question: "Where?", options: ["Pizza", ""] }, poll)).toBe('"options" needs 2 to 12 entries.');
+        // Each list has the limits its hint names.
+        const many = Array.from({ length: 13 }, (_, i) => `Option ${i + 1}`);
+        expect(checkSettings({ options: many }, poll)).toBe('"options" needs 2 to 12 entries.');
+        expect(checkSettings({ columns: ["A", "B", "C", "D", "E", "F", "G"] }, TEMPLATES.find((t) => t.id === "kanban")!)).toBe('"columns" needs 2 to 6 entries.');
+        expect(checkSettings({ marks: ["❌", "⭕", "🔺"] }, TEMPLATES.find((t) => t.id === "game")!)).toBe('"marks" needs exactly 2 entries.');
+        for (const t of TEMPLATES.filter((t) => t.lists))
+            for (const [key, [min, max]] of Object.entries(t.lists!)) expect(t.fields![key], `${t.id}.${key}`).toContain(min === max ? "two" : `${min} to ${max}`);
         const picker = TEMPLATES.find((t) => t.id === "picker")!;
         expect(checkSettings({ choices: ["Anna"] }, picker)).toMatchObject({ choices: ["Anna"] });
         const sketch = TEMPLATES.find((t) => t.id === "sketch")!;

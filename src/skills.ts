@@ -32,6 +32,8 @@ export interface Template {
      */
     does?: string;
     fields?: Record<string, string>;
+    /** How many entries a list setting takes, [min, max]; 2 to 20 when not given. */
+    lists?: Record<string, [number, number]>;
 }
 
 export const TEMPLATES: Template[] = [
@@ -42,6 +44,7 @@ export const TEMPLATES: Template[] = [
         html: poll,
         does: "Each person votes for one of a fixed list of options and can change their vote. It shows the counts and who voted.",
         fields: { title: "a short name for the app", question: "the question people vote on", options: "the answers to choose from, 2 to 12" },
+        lists: { options: [2, 12] },
     },
     {
         id: "checklist",
@@ -63,6 +66,7 @@ export const TEMPLATES: Template[] = [
             size: "the board's width and height, 3 to 9",
             line: "how many marks in a row win, 3 up to the size",
         },
+        lists: { marks: [2, 2] },
     },
     {
         id: "kanban",
@@ -71,6 +75,7 @@ export const TEMPLATES: Template[] = [
         html: kanban,
         does: "Everyone adds cards to the first column, moves cards between the columns with arrow buttons and removes them.",
         fields: { title: "the heading", placeholder: "the hint in the text field, e.g. \"New card\"", columns: "the column names, left to right, 2 to 6" },
+        lists: { columns: [2, 6] },
     },
     {
         id: "picker",
@@ -78,7 +83,8 @@ export const TEMPLATES: Template[] = [
         keywords: ["random", "pick", "picker", "dice", "draw", "lottery", "wheel", "spin", "zufall", "zufällig", "würfel", "würfeln", "auslosen", "losen", "glücksrad", "rad", "drehen", "roulette", "who's next", "shuffle"],
         html: picker,
         does: "A list of names or choices that anyone can edit; a button picks one at random and everyone sees the same result.",
-        fields: { title: "the heading, e.g. the question that is decided", choices: "the names or choices to pick from", button: "the label of the button" },
+        fields: { title: "the heading, e.g. the question that is decided", choices: "the names or choices to pick from, 1 to 20", button: "the label of the button" },
+        lists: { choices: [1, 20] },
     },
     {
         id: "scoreboard",
@@ -103,6 +109,7 @@ export const TEMPLATES: Template[] = [
         html: sketch,
         does: "A shared drawing canvas that everyone draws on with a few colours, and a Clear button.",
         fields: { title: "the heading", colors: "the pen colours, as #rrggbb, 2 to 8" },
+        lists: { colors: [2, 8] },
     },
     { id: "blank", label: "Blank", keywords: [], html: blank },
 ];
@@ -274,8 +281,8 @@ export function checkSettings(raw: Record<string, unknown>, t: Template): Settin
         else if (Array.isArray(fallback)) {
             if (!Array.isArray(v)) return `"${key}" must be a list.`;
             const items = [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean))].map((x) => x.slice(0, 80));
-            const min = key === "choices" ? 1 : 2;
-            if (items.length < min || items.length > 20) return `"${key}" needs ${min} to 20 entries.`;
+            const [min, max] = t.lists?.[key] ?? [2, 20];
+            if (items.length < min || items.length > max) return min === max ? `"${key}" needs exactly ${min} entries.` : `"${key}" needs ${min} to ${max} entries.`;
             if (key === "colors" && !items.every(isColor)) return `"${key}" must be colours written as #rrggbb.`;
             out[key] = items;
         } else {

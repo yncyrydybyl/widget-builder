@@ -35,9 +35,9 @@ change to it. **undo** goes back a version, and **new app** starts over.
 | Checks | Before an app runs, it is checked for network use, external files, browser storage, `alert` and a cut-off file. Problems go back to the model once, automatically. So does an error the preview reports when the app starts; after that, the "Ask the model to fix it" button does it. |
 | Sandbox | Apps run in `sandbox.html` inside `<iframe sandbox="allow-scripts">`: an opaque origin with its own CSP (inline code only, **no network**). An app cannot reach the widget, the user's account or storage. |
 | Bridge | `window.miniapp` (`ready`, `send`, `on`, `displayName`), injected in front of the app's code. The builder adds the real sender to every event, so an app cannot act as someone else. |
-| Publishing | One room state event per app (`de.minagawa.widget_builder.app`, state key = app id, the HTML in the content, at most 48 KB). Everyone who joins sees it. Needs the power level for room settings, like adding a widget does. |
-| Using an app | Actions are timeline events (`de.minagawa.widget_builder.event`, `{ app, data }`). Every member can send them, and they are encrypted in E2EE rooms. An app rebuilds its state by replaying them. Each app may send at most 5 in a burst, then one every 2 s. |
-| Own widget | Publishing also adds the app to the room as a widget of its own (`im.vector.modular.widgets`, state key `widget_builder_<app id>`). Its URL is this builder with `#/?app=<id>` and holds no code: the widget reads the app's HTML from the app's state event, so a new version shows up in the open widget by itself. That widget asks only to read **that one** state event (`receive.state_event:de.minagawa.widget_builder.app#<id>`) and the app's actions. The Apps tab can remove the widget or add it again; without the permission it copies an `/addwidget` command instead. |
+| Publishing | One room state event per app (`de.datanauten.widget_builder.app`, state key = app id, the HTML in the content, at most 48 KB). Everyone who joins sees it. Needs the power level for room settings, like adding a widget does. |
+| Using an app | Actions are timeline events (`de.datanauten.widget_builder.event`, `{ app, data }`). Every member can send them, and they are encrypted in E2EE rooms. An app rebuilds its state by replaying them. Each app may send at most 5 in a burst, then one every 2 s. |
+| Own widget | Publishing also adds the app to the room as a widget of its own (`im.vector.modular.widgets`, state key `widget_builder_<app id>`). Its URL is this builder with `#/?app=<id>` and holds no code: the widget reads the app's HTML from the app's state event, so a new version shows up in the open widget by itself. That widget asks only to read **that one** state event (`receive.state_event:de.datanauten.widget_builder.app#<id>`) and the app's actions. The Apps tab can remove the widget or add it again; without the permission it copies an `/addwidget` command instead. |
 
 ## Does it need external calls?
 
@@ -133,15 +133,15 @@ board; one code), and both pass because adding ideas works.
 | Capability | Why |
 |---|---|
 | `io.element.requires_client` | No session of its own |
-| `org.matrix.msc2762.send.state_event:de.minagawa.widget_builder.app` | Publish, update and remove apps |
-| `org.matrix.msc2762.receive.state_event:de.minagawa.widget_builder.app` | List the room's apps |
-| `org.matrix.msc2762.send.event:de.minagawa.widget_builder.event` | An app's actions (votes, items) |
-| `org.matrix.msc2762.receive.event:de.minagawa.widget_builder.event` | Everyone else's actions |
+| `org.matrix.msc2762.send.state_event:de.datanauten.widget_builder.app` | Publish, update and remove apps |
+| `org.matrix.msc2762.receive.state_event:de.datanauten.widget_builder.app` | List the room's apps |
+| `org.matrix.msc2762.send.event:de.datanauten.widget_builder.event` | An app's actions (votes, items) |
+| `org.matrix.msc2762.receive.event:de.datanauten.widget_builder.event` | Everyone else's actions |
 | `org.matrix.msc2762.send.state_event:im.vector.modular.widgets` | Add each published app to the room as its own widget, remove it again |
 | `org.matrix.msc2762.receive.state_event:im.vector.modular.widgets` | Know which apps already are room widgets |
 
 A room widget for one app (`#/?app=<id>`) asks for less: `requires_client`,
-`receive.state_event:de.minagawa.widget_builder.app#<id>` and the two event capabilities.
+`receive.state_event:de.datanauten.widget_builder.app#<id>` and the two event capabilities.
 
 ## Tests
 

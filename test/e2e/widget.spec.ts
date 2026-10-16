@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 
 const ME = "@alice:example.org";
-const APP = "de.minagawa.widget_builder.app";
-const EVENT = "de.minagawa.widget_builder.event";
+const APP = "de.datanauten.widget_builder.app";
+const EVENT = "de.datanauten.widget_builder.event";
 const WIDGETS = "im.vector.modular.widgets";
 const poll = readFileSync(new URL("../../src/skills/templates/poll.html", import.meta.url), "utf8");
 

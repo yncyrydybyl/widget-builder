@@ -8,8 +8,8 @@
  */
 import type { IRoomEvent } from "matrix-widget-api";
 
-export const APP_TYPE = "de.minagawa.widget_builder.app";
-export const EVENT_TYPE = "de.minagawa.widget_builder.event";
+export const APP_TYPE = "de.datanauten.widget_builder.app";
+export const EVENT_TYPE = "de.datanauten.widget_builder.event";
 
 /** State events must stay under 64 KiB including JSON escaping. */
 export const MAX_HTML = 48_000;

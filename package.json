@@ -6,6 +6,12 @@
   "type": "module",
   "author": "Yan Minagawa",
   "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yncyrydybyl/widget-builder.git"
+  },
+  "homepage": "https://github.com/yncyrydybyl/widget-builder#readme",
+  "bugs": "https://github.com/yncyrydybyl/widget-builder/issues",
   "packageManager": "pnpm@10.29.3",
   "scripts": {
     "dev": "pnpm vendor && vite",

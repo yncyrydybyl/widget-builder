@@ -15,7 +15,7 @@ import {
     type IRoomEvent,
     type IWidgetApiRequest,
 } from "matrix-widget-api";
-import { APP_TYPE, EVENT_TYPE } from "./apps";
+import { APP_TYPE, EVENT_TYPE, WIDGET_TYPE } from "./apps";
 
 /** Parameters may arrive in the query (host-appended) or the fragment (ours). */
 export interface Params {
@@ -32,19 +32,37 @@ export function readParams(search = window.location.search, hash = window.locati
     return { get: (name) => fragment.get(name) ?? query.get(name) };
 }
 
-export const CAPABILITIES: Capability[] = [
+/**
+ * The builder reads and publishes apps and adds each one to the room as its own
+ * widget. A runner (`app` set) shows one app: it reads only that app's state
+ * event and its actions, nothing else.
+ */
+export function capabilitiesFor(app: string | null): Capability[] {
+    const state = (dir: EventDirection, type: string, key?: string) =>
+        WidgetEventCapability.forStateEvent(dir, type, key).raw as Capability;
+    const actions = [
+        // What people do in an app (a vote, a checked item): timeline events, which
+        // every member may send and which are encrypted in an E2EE room.
+        WidgetEventCapability.forRoomEvent(EventDirection.Send, EVENT_TYPE).raw as Capability,
+        WidgetEventCapability.forRoomEvent(EventDirection.Receive, EVENT_TYPE).raw as Capability,
+    ];
     // Useless outside a client: it has no session of its own. Auto-granted by
     // Element and the Player; hides Element's "pop out" button.
-    MatrixCapabilities.RequiresClient,
-    // Published apps: one state event per app, so everyone who joins sees them.
-    // Publishing needs the room's state power level, like adding a widget does.
-    WidgetEventCapability.forStateEvent(EventDirection.Send, APP_TYPE).raw as Capability,
-    WidgetEventCapability.forStateEvent(EventDirection.Receive, APP_TYPE).raw as Capability,
-    // What people do in an app (a vote, a checked item): timeline events, which
-    // every member may send and which are encrypted in an E2EE room.
-    WidgetEventCapability.forRoomEvent(EventDirection.Send, EVENT_TYPE).raw as Capability,
-    WidgetEventCapability.forRoomEvent(EventDirection.Receive, EVENT_TYPE).raw as Capability,
-];
+    const base = [MatrixCapabilities.RequiresClient as Capability];
+    // The app's code lives in its state event; the runner may read that one only.
+    if (app) return [...base, state(EventDirection.Receive, APP_TYPE, app), ...actions];
+    return [
+        ...base,
+        // Published apps: one state event per app, so everyone who joins sees them.
+        // Publishing needs the room's state power level, like adding a widget does.
+        state(EventDirection.Send, APP_TYPE),
+        state(EventDirection.Receive, APP_TYPE),
+        ...actions,
+        // Each published app becomes a room widget of its own.
+        state(EventDirection.Send, WIDGET_TYPE),
+        state(EventDirection.Receive, WIDGET_TYPE),
+    ];
+}
 
 export interface Connection {
     api: WidgetApi;
@@ -59,6 +77,7 @@ export interface Connection {
  */
 export async function connect(
     params: Params,
+    capabilities: Capability[],
     handlers: {
         onState?: (events: IRoomEvent[]) => void;
         onEvent?: (event: IRoomEvent) => void;
@@ -88,7 +107,7 @@ export async function connect(
     // Every capability before start(): the Player has no MSC2974 renegotiation,
     // so requestCapability() after the handshake throws there. On Element a later
     // request works but costs the user a second consent prompt.
-    for (const c of CAPABILITIES) api.requestCapability(c);
+    for (const c of capabilities) api.requestCapability(c);
 
     const ack = (ev: CustomEvent<IWidgetApiRequest>): void => {
         ev.preventDefault();

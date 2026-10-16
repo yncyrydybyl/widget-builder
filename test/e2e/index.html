@@ -27,7 +27,8 @@
              *   widgetPath: "/index.html",
              * };
              * Push a live room event with window.__toWidget("send_event", event), as a
-             * client does for new messages while the widget is open.
+             * client does for new messages while the widget is open, and a state change
+             * with window.__pushState([event]) (filtered by the approved state capabilities).
              * Afterwards inspect window.__REQUESTED_CAPABILITIES__, __RENEGOTIATED__,
              * __SENT__, __UPLOADS__, __DOWNLOADS__, __READ_EVENTS__, __CONTENT_LOADED__.
              */
@@ -59,6 +60,17 @@
 
             window.__toWidget = toWidget;
 
+            const PREFIX = "org.matrix.msc2762.receive.state_event:";
+            function allowedState(events) {
+                const filters = approvedSet.filter((c) => c.startsWith(PREFIX)).map((c) => {
+                    const [type, key] = c.slice(PREFIX.length).split("#");
+                    return { type, key };
+                });
+                return events.filter((e) => filters.some((f) => f.type === e.type && (f.key === undefined || f.key === e.state_key)));
+            }
+            /** A state change while the widget is open, filtered like a host does. */
+            window.__pushState = (events) => toWidget("update_state", { state: allowedState(events) });
+
             let negotiated = false;
             let approvedSet = [];
 
@@ -72,9 +84,10 @@
                         window.__REQUESTED_CAPABILITIES__ = m.response.capabilities;
                         approvedSet = fixture.deny ? [] : m.response.capabilities;
                         toWidget("notify_capabilities", { approved: approvedSet, requested: m.response.capabilities });
-                        // Like a real host: initial room state for approved receive.state_event filters.
+                        // Like a real host: initial room state, only what approved
+                        // receive.state_event:<type>[#<state_key>] filters allow.
                         if (approvedSet.some((c) => c.startsWith("org.matrix.msc2762.receive.state_event:"))) {
-                            toWidget("update_state", { state: fixture.state ?? [] });
+                            toWidget("update_state", { state: allowedState(fixture.state ?? []) });
                         }
                     }
                     return;

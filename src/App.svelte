@@ -53,7 +53,10 @@
 {#if c.runnerOnly}
     <main class="runner">
         {#if runner}
-            <AppFrame {c} html={runner.html} appId={runner.id} events={c.events[runner.id] ?? []} title={runner.name} />
+            <!-- A new version of the app replaces the running one. -->
+            {#key runner.html}
+                <AppFrame {c} html={runner.html} appId={runner.id} events={c.events[runner.id] ?? []} title={runner.name} />
+            {/key}
         {:else if c.room === "no-permission"}
             <p class="note warn">This app needs permission to read apps in this room.</p>
         {:else}
@@ -203,11 +206,17 @@
                         <li class:open={c.running === a.id}>
                             <div class="grow">
                                 <b>{a.name}</b>
-                                <span class="small muted">v{a.version} by {name(a.author)} · {(c.events[a.id] ?? []).length} actions</span>
+                                <span class="small muted">v{a.version} by {name(a.author)} · {(c.events[a.id] ?? []).length} actions{a.id in c.roomWidgets ? " · room widget" : ""}</span>
                             </div>
                             <button type="button" onclick={() => (c.running = c.running === a.id ? null : a.id)}>{c.running === a.id ? "Close" : "Open"}</button>
                             <button type="button" class="secondary" onclick={() => c.edit(a.id)}>Edit</button>
-                            <button type="button" class="link" onclick={() => copy(a.id)}>{copied === a.id ? "copied" : "as widget"}</button>
+                            {#if a.id in c.roomWidgets}
+                                <button type="button" class="link" onclick={() => c.removeFromRoom(a.id)} title="Remove this app's own widget from the room">remove widget</button>
+                            {:else if c.canAddWidgets}
+                                <button type="button" class="link" onclick={() => c.addToRoom(a.id, a.name)}>add as widget</button>
+                            {:else}
+                                <button type="button" class="link" onclick={() => copy(a.id)}>{copied === a.id ? "copied" : "copy /addwidget"}</button>
+                            {/if}
                             <button type="button" class="link danger" onclick={() => c.remove(a.id)}>remove</button>
                         </li>
                     {/each}
@@ -223,7 +232,8 @@
             {/if}
             <p class="small muted">
                 Apps run sandboxed: no network, no access to your account, and they can only send and read their own actions in
-                this room. "as widget" copies an <code>/addwidget</code> command that shows one app on its own.
+                this room. Publishing also adds the app to the room as a widget of its own; that widget loads the app's code from its
+                room event, so a new version shows up there by itself.
             </p>
         {/if}
     </main>

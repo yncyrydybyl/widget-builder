@@ -177,3 +177,32 @@ export class Bucket {
         return true;
     }
 }
+
+/*
+ * A published app as its own room widget: an `im.vector.modular.widgets` state
+ * event whose URL is this builder in runner mode (`#/?app=<id>`). The URL holds
+ * no code; the runner reads the app's HTML from its state event in the room, so
+ * a new version of the app reaches the widget without touching the widget.
+ */
+export const WIDGET_TYPE = "im.vector.modular.widgets";
+
+/** The room widget's state key: one per app, so republishing never adds a second one. */
+export function roomWidgetId(appId: string): string {
+    return `widget_builder_${appId}`;
+}
+
+/** The app a room widget shows, if it is one of ours. */
+export function appOfRoomWidget(stateKey: string): string | null {
+    return stateKey.startsWith("widget_builder_") ? stateKey.slice("widget_builder_".length) || null : null;
+}
+
+export function roomWidgetContent(appId: string, name: string, url: string, creator: string): Record<string, unknown> {
+    return {
+        type: "m.custom",
+        url,
+        name,
+        creatorUserId: creator,
+        waitForIframeLoad: true,
+        data: { title: name, app: appId },
+    };
+}

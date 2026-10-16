@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shared board</title>
+<style>
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  form { display: flex; gap: 8px; margin-bottom: 12px; }
+  input[type=text] { flex: 1; min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+  button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+  .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .column { border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-height: 120px; }
+  .column h2 { font-size: 14px; margin: 0 0 8px; color: var(--muted); }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
+  .card small { display: block; color: var(--muted); margin: 2px 0 6px; }
+  .card button { min-height: 28px; padding: 0 8px; margin-right: 4px; background: transparent; color: var(--fg); border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<h1>Shared board</h1>
+<form id="add">
+  <input id="text" type="text" placeholder="New card" aria-label="New card" maxlength="200">
+  <button type="submit">Add</button>
+</form>
+<div class="board" id="board"></div>
+<script>
+  const COLUMNS = ["To do", "Doing", "Done"];
+  const cards = new Map(); // event id -> { text, column, by }
+
+  miniapp.on((ev) => {
+    const d = ev.data || {};
+    if (typeof d.add === "string") cards.set(ev.id, { text: d.add, column: 0, by: ev.sender });
+    if (d.move && cards.has(d.move) && typeof d.column === "number") {
+      cards.get(d.move).column = Math.max(0, Math.min(COLUMNS.length - 1, d.column));
+    }
+    if (d.remove) cards.delete(d.remove);
+    render();
+  });
+
+  document.getElementById("add").onsubmit = (e) => {
+    e.preventDefault();
+    const input = document.getElementById("text");
+    const text = input.value.trim();
+    if (text) miniapp.send({ add: text });
+    input.value = "";
+  };
+
+  function button(label, title, onclick) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.setAttribute("aria-label", title);
+    b.onclick = onclick;
+    return b;
+  }
+
+  function render() {
+    const board = document.getElementById("board");
+    board.textContent = "";
+    COLUMNS.forEach((name, col) => {
+      const column = document.createElement("section");
+      column.className = "column";
+      const title = document.createElement("h2");
+      title.textContent = name;
+      column.append(title);
+      for (const [id, card] of cards) {
+        if (card.column !== col) continue;
+        const el = document.createElement("div");
+        el.className = "card";
+        const text = document.createElement("span");
+        text.textContent = card.text;
+        const by = document.createElement("small");
+        by.textContent = miniapp.displayName(card.by);
+        el.append(text, by);
+        if (col > 0) el.append(button("←", "Move " + card.text + " to " + COLUMNS[col - 1], () => miniapp.send({ move: id, column: col - 1 })));
+        if (col < COLUMNS.length - 1) el.append(button("→", "Move " + card.text + " to " + COLUMNS[col + 1], () => miniapp.send({ move: id, column: col + 1 })));
+        el.append(button("✕", "Remove " + card.text, () => miniapp.send({ remove: id })));
+        column.append(el);
+      }
+      board.append(column);
+    });
+  }
+
+  miniapp.ready(render);
+</script>
+</body>
+</html>

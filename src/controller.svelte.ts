@@ -4,11 +4,11 @@
  * events. Reactive with runes; App.svelte renders it.
  */
 import type { IRoomEvent, WidgetApi } from "matrix-widget-api";
-import { APP_TYPE, Bucket, EVENT_TYPE, checkHtml, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent } from "./apps";
+import { APP_TYPE, Bucket, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent } from "./apps";
 import { stripThinking } from "./chat";
 import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadWebLlm, webGpuStatus, webLlmId, type Engine, type ModelInfo } from "./llm";
 import { TEMPLATES, buildMessages, pickTemplate, type Task } from "./skills";
-import { CAPABILITIES, connect, initialTheme, readParams, type Params } from "./widget-connect";
+import { capabilitiesFor, connect, initialTheme, readParams, type Params } from "./widget-connect";
 
 export type RoomStatus = "standalone" | "connecting" | "ready" | "no-permission";
 export type EngineStatus = "idle" | "loading" | "ready" | "error";
@@ -92,6 +92,8 @@ export class Controller {
     events = $state<Record<string, AppEvent[]>>({});
     /** Actions in the preview: local only, never sent. */
     previewEvents = $state<AppEvent[]>([]);
+    /** Apps that are also room widgets of their own: app id → widget name. */
+    roomWidgets = $state<Record<string, string>>({});
     view = $state<"build" | "apps">("build");
     running = $state<string | null>(null);
     notice = $state("");
@@ -139,7 +141,8 @@ export class Controller {
             if (!this.models.some((m) => m.id === this.settings.modelId)) this.settings.modelId = this.models[0].id;
             void this.refreshCache();
         });
-        const conn = await connect(this.params, {
+        const capabilities = capabilitiesFor(this.runnerOnly);
+        const conn = await connect(this.params, capabilities, {
             onState: (events) => this.onState(events),
             onEvent: (ev) => this.onEvent(ev),
             onTheme: (name) => (this.theme = name.startsWith("dark") ? "dark" : "light"),
@@ -149,7 +152,7 @@ export class Controller {
             return;
         }
         this.api = conn.api;
-        const needed = CAPABILITIES.filter((c) => c !== "io.element.requires_client");
+        const needed = capabilities.filter((c) => c !== "io.element.requires_client");
         this.missing = needed.filter((c) => !conn.approved.includes(c));
         if (this.missing.length === needed.length) {
             this.room = "no-permission";
@@ -165,8 +168,16 @@ export class Controller {
 
     private onState(events: IRoomEvent[]): void {
         for (const ev of events) {
-            if (ev.type !== APP_TYPE) continue;
             const key = (ev as IRoomEvent & { state_key?: string }).state_key;
+            if (ev.type === WIDGET_TYPE) {
+                const app = appOfRoomWidget(key ?? "");
+                if (!app) continue;
+                const { [app]: _, ...rest } = this.roomWidgets;
+                const name = (ev.content as { name?: unknown } | undefined)?.name;
+                this.roomWidgets = (ev.content as { url?: unknown } | undefined)?.url ? { ...rest, [app]: typeof name === "string" ? name : app } : rest;
+                continue;
+            }
+            if (ev.type !== APP_TYPE) continue;
             const app = toApp(ev);
             const rest = this.apps.filter((a) => a.id !== key);
             this.apps = app ? [...rest, app].sort((a, b) => a.name.localeCompare(b.name)) : rest;
@@ -175,7 +186,7 @@ export class Controller {
 
     private onEvent(ev: IRoomEvent): void {
         // Element pushes state changes as send_event too.
-        if (ev.type === APP_TYPE) return this.onState([ev]);
+        if (ev.type === APP_TYPE || ev.type === WIDGET_TYPE) return this.onState([ev]);
         const e = toAppEvent(ev);
         if (e) this.addEvent(e);
     }
@@ -367,6 +378,43 @@ export class Controller {
         this.onState([{ type: APP_TYPE, state_key: id, sender: this.userId, origin_server_ts: Date.now(), content, event_id: "", room_id: "", unsigned: {} } as IRoomEvent]);
         this.draft = { ...this.draft, appId: id, name: content.name };
         this.notice = `Published "${content.name}" (version ${content.version}).`;
+        // Every published app becomes a room widget too. Its URL only names the
+        // app, so a new version needs no widget change unless the name changed.
+        if (this.roomWidgets[id] !== content.name) {
+            const added = await this.addToRoom(id, content.name);
+            if (added) this.notice += " It is in the room's widgets now.";
+        }
+    }
+
+    /** The widget may add room widgets (an approved capability, plus the power level when sending). */
+    get canAddWidgets(): boolean {
+        return !!this.api && !this.missing.includes(`org.matrix.msc2762.send.state_event:${WIDGET_TYPE}`);
+    }
+
+    /** Adds an app to the room as its own widget, or renames it there. */
+    async addToRoom(id: string, name: string): Promise<boolean> {
+        if (!this.api || !this.canAddWidgets) return false;
+        const content = roomWidgetContent(id, name, this.widgetUrl(id), this.userId);
+        try {
+            await this.api.sendStateEvent(WIDGET_TYPE, roomWidgetId(id), content);
+        } catch (e) {
+            this.notice = `Could not add "${name}" as a room widget: ${e instanceof Error ? e.message : String(e)}`;
+            return false;
+        }
+        this.roomWidgets = { ...this.roomWidgets, [id]: name };
+        return true;
+    }
+
+    /** Removes an app's room widget; the app itself stays published. */
+    async removeFromRoom(id: string): Promise<void> {
+        if (!this.api || !(id in this.roomWidgets)) return;
+        try {
+            await this.api.sendStateEvent(WIDGET_TYPE, roomWidgetId(id), {});
+            const { [id]: _, ...rest } = this.roomWidgets;
+            this.roomWidgets = rest;
+        } catch (e) {
+            this.notice = `Could not remove the room widget: ${e instanceof Error ? e.message : String(e)}`;
+        }
     }
 
     async remove(id: string): Promise<void> {
@@ -374,6 +422,7 @@ export class Controller {
         try {
             await this.api.sendStateEvent(APP_TYPE, id, {});
             this.apps = this.apps.filter((a) => a.id !== id);
+            await this.removeFromRoom(id);
             if (this.running === id) this.running = null;
         } catch (e) {
             this.notice = `Could not remove: ${e instanceof Error ? e.message : String(e)}`;
@@ -390,7 +439,7 @@ export class Controller {
         this.view = "build";
     }
 
-    /** The URL that shows one app on its own, for /addwidget. */
+    /** The URL that shows one app on its own; the client fills in the $ placeholders. */
     widgetUrl(id: string): string {
         const base = window.location.href.split("#")[0].split("?")[0];
         return `${base}#/?app=${encodeURIComponent(id)}&matrix_user_id=$matrix_user_id&theme=$org.matrix.msc2873.client_theme`;

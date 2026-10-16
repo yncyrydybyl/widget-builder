@@ -67,6 +67,7 @@ describe("skills", () => {
         expect(pickTemplate("A countdown timer to the release on 1 December").id).toBe("countdown");
         expect(pickTemplate("Ein gemeinsames Glücksrad: Namen eingeben, drehen").id).toBe("picker");
         expect(pickTemplate("a guestbook").id).toBe("blank");
+        expect(pickTemplate("a todo kanban board").id).toBe("kanban");
     });
 
     it("builds a prompt with rules, API and template, request last", () => {

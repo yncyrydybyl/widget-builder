@@ -12,6 +12,7 @@ import rules from "./skills/rules.md?raw";
 import blank from "./skills/templates/blank.html?raw";
 import checklist from "./skills/templates/checklist.html?raw";
 import countdown from "./skills/templates/countdown.html?raw";
+import kanban from "./skills/templates/kanban.html?raw";
 import picker from "./skills/templates/picker.html?raw";
 import poll from "./skills/templates/poll.html?raw";
 import scoreboard from "./skills/templates/scoreboard.html?raw";
@@ -36,6 +37,12 @@ export const TEMPLATES: Template[] = [
         label: "Checklist",
         keywords: ["list", "todo", "to-do", "task", "checklist", "shopping", "packing", "liste", "aufgabe", "einkauf", "agenda", "items", "bring"],
         html: checklist,
+    },
+    {
+        id: "kanban",
+        label: "Kanban board",
+        keywords: ["kanban", "board", "trello", "columns", "column", "backlog", "sprint", "workflow", "spalten", "tafel"],
+        html: kanban,
     },
     {
         id: "picker",

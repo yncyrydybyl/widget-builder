@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const ME = "@alice:example.org";
 const APP = "de.minagawa.widget_builder.app";
 const EVENT = "de.minagawa.widget_builder.event";
+const WIDGETS = "im.vector.modular.widgets";
 const poll = readFileSync(new URL("../../src/skills/templates/poll.html", import.meta.url), "utf8");
 
 const appState = (id: string, html: string, name = "Lunch poll") => ({
@@ -50,6 +51,8 @@ test("requests exactly the capabilities it needs", async ({ page }) => {
             `org.matrix.msc2762.receive.state_event:${APP}`,
             `org.matrix.msc2762.send.event:${EVENT}`,
             `org.matrix.msc2762.receive.event:${EVENT}`,
+            `org.matrix.msc2762.send.state_event:${WIDGETS}`,
+            `org.matrix.msc2762.receive.state_event:${WIDGETS}`,
         ].sort(),
     );
 });
@@ -74,7 +77,27 @@ test("builds an app from a template, previews it locally and publishes it", asyn
     expect(state.state_key).toBe("lunch-poll");
     expect(state.content).toMatchObject({ name: "Lunch poll", version: 1 });
     expect(String(state.content.html)).toContain("miniapp.send({ vote: option })");
-    await expect(w.getByRole("button", { name: "Apps (1)" })).toBeVisible();
+
+    // It is added to the room as its own widget; the URL names the app, the code stays in the state event.
+    await expect(w.getByText(/in the room's widgets now/)).toBeVisible();
+    const widget = (await sent(page)).find((e) => e.type === WIDGETS)!;
+    expect(widget.state_key).toBe("widget_builder_lunch-poll");
+    expect(widget.content).toMatchObject({ type: "m.custom", name: "Lunch poll", creatorUserId: ME, data: { app: "lunch-poll" } });
+    const url = String(widget.content.url);
+    expect(url).toContain("#/?app=lunch-poll&matrix_user_id=$matrix_user_id");
+    expect(url).not.toContain("widgetId");
+    expect(url).not.toContain("<html");
+
+    // Publishing a new version keeps the one widget.
+    await w.getByRole("button", { name: "Publish update" }).click();
+    await expect(w.getByText(/Published "Lunch poll" \(version 2\)/)).toBeVisible();
+    expect((await sent(page)).filter((e) => e.type === WIDGETS)).toHaveLength(1);
+
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await expect(w.getByText(/room widget/)).toBeVisible();
+    await w.getByRole("button", { name: "remove widget" }).click();
+    await expect(w.getByRole("button", { name: "add as widget" })).toBeVisible();
+    expect((await sent(page)).filter((e) => e.type === WIDGETS).at(-1)).toEqual({ type: WIDGETS, state_key: "widget_builder_lunch-poll", content: {} });
 });
 
 test("runs a published app with the room's shared actions", async ({ page }) => {
@@ -113,12 +136,30 @@ test("an app cannot reach the network or the widget", async ({ page }) => {
     await expect(w.frameLocator("iframe.app-frame").getByText("parent: no, storage: no, fetch: no")).toBeVisible();
 });
 
-test("reports an app's runtime error, and shows one app on its own as a widget", async ({ page }) => {
+test("a room widget loads its app's code from the app's state event, and nothing else", async ({ page }) => {
     const broken = "<!doctype html><html><head><title>b</title></head><body><script>undefinedThing()</script></body></html>";
     const w = await open(page, { params: { engine: "echo", matrix_user_id: ME, app: "lunch" }, state: [appState("lunch", poll), appState("broken", broken, "Broken")] });
     // Runner mode: just the app.
     await expect(w.frameLocator("iframe.app-frame").getByText("Where do we have lunch?")).toBeVisible();
     await expect(w.getByText("Widget Builder")).toHaveCount(0);
+    const caps = await page.evaluate(() => (window as unknown as { __REQUESTED_CAPABILITIES__: string[] }).__REQUESTED_CAPABILITIES__);
+    expect(caps.sort()).toEqual(
+        [
+            "io.element.requires_client",
+            `org.matrix.msc2762.receive.state_event:${APP}#lunch`,
+            `org.matrix.msc2762.send.event:${EVENT}`,
+            `org.matrix.msc2762.receive.event:${EVENT}`,
+        ].sort(),
+    );
+
+    // A new version published from the builder reaches the open widget.
+    const v2 = poll.replace("Where do we have lunch?", "Where do we have dinner?");
+    await page.evaluate((e) => (window as unknown as { __pushState: (s: unknown[]) => void }).__pushState(e), [{ ...appState("lunch", v2), event_id: "$v2" }]);
+    await expect(w.frameLocator("iframe.app-frame").getByText("Where do we have dinner?")).toBeVisible();
+});
+
+test("reports an app's runtime error", async ({ page }) => {
+    const broken = "<!doctype html><html><head><title>b</title></head><body><script>undefinedThing()</script></body></html>";
 
     const w2 = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("broken", broken, "Broken")] });
     await w2.getByRole("button", { name: "Apps (1)" }).click();

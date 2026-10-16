@@ -46,7 +46,8 @@ const MIN_CHUNK = 300;
  */
 const FIRST_CHUNK = 2400;
 const MAX_GPU_RETRIES = 3;
-const isGpuLoss = (msg: string): boolean => /device (was )?lost|GPUBuffer|mapAsync|DEVICE_LOST/i.test(msg);
+// "Model not loaded": the engine died with an earlier device loss.
+const isGpuLoss = (msg: string): boolean => /device (was )?lost|GPUBuffer|mapAsync|DEVICE_LOST|ModelNotLoaded|not loaded/i.test(msg);
 
 function loadSettings(): Settings {
     const defaults: Settings = { modelId: DEFAULT_MODEL, chunks: {} };
@@ -312,6 +313,16 @@ export class Controller {
                 }
                 // Stays busy through the retry: run() takes over the flag.
                 return await this.run(task, gpuRetries + 1, repaired);
+            }
+            if (isGpuLoss(msg) && !this.abort?.signal.aborted) {
+                // Out of retries: the engine is gone. Say so instead of failing every later request.
+                const tooBig = `${engine.modelId} keeps resetting this GPU, even in small parts. Choose a smaller model.`;
+                update({ text: tooBig, lines: undefined, error: true });
+                this.engine = null;
+                this.engineStatus = "error";
+                this.engineError = tooBig;
+                void engine.unload().catch(() => undefined);
+                return;
             }
             update({ text: msg, lines: undefined, error: true });
         } finally {

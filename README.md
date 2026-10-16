@@ -78,6 +78,26 @@ RDNA 3.5, shared memory), October 2026:
   not better at code, as Liquid says. It also copied the prompt's `<template>` tags around its
   answer, which made every app blank until the extraction kept only the document.
 
+## Trying apps out before showing them
+
+Every new app is used once in a hidden sandbox before anyone sees it (`src/probe.ts`): the probe
+types a word into each field (and fills the rest of the form), submits, clicks the buttons and
+draws on a canvas, with sends echoed back as from a room. Problems ("typing into 'New card'
+shares nothing", "Kiwi41 never appears on the page") go back to the model: up to three model
+calls per request, and the version with the fewest problems stays. `#/?probe=0` turns it off.
+
+Benchmark, Qwen 2.5 Coder 1.5B on a Radeon 860M, 12 tasks × 2 runs:
+
+| | Apps that work | Time for 24 apps |
+|---|---|---|
+| Without the probe | 19/24 (79%) | 39 min (one run hung for 17 min) |
+| With the probe | 23/24 (96%) | 32 min |
+
+Typical catch: asked to rename the kanban board, the model also dropped the `render()` call in
+`miniapp.on`, so cards were added but never shown. Apps that pass need about 50 s as before;
+apps that need fixes take 2.5–4 min. The benchmark's checks are separate code from the probe,
+but both type and click, so they are not fully independent.
+
 ## Limits
 
 - **Apps replay only recent history.** Hosts return roughly the last 50–100 app events, so an

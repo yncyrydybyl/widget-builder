@@ -178,7 +178,7 @@ test("a room widget loads its app's code from the app's state event, and nothing
     const w = await open(page, { params: { engine: "echo", matrix_user_id: ME, app: "lunch" }, state: [appState("lunch", poll), appState("broken", broken, "Broken")] });
     // Runner mode: just the app.
     await expect(w.frameLocator("iframe.app-frame").getByText("Where do we have lunch?")).toBeVisible();
-    await expect(w.getByText("Widget Builder")).toHaveCount(0);
+    await expect(w.getByRole("heading", { name: "Widget Builder" })).toHaveCount(0);
     const caps = await page.evaluate(() => (window as unknown as { __REQUESTED_CAPABILITIES__: string[] }).__REQUESTED_CAPABILITIES__);
     expect(caps.sort()).toEqual(
         [
@@ -193,6 +193,21 @@ test("a room widget loads its app's code from the app's state event, and nothing
     const v2 = poll.replaceAll("Where do we have lunch?", "Where do we have dinner?");
     await page.evaluate((e) => (window as unknown as { __pushState: (s: unknown[]) => void }).__pushState(e), [{ ...appState("lunch", v2), event_id: "$v2" }]);
     await expect(w.frameLocator("iframe.app-frame").getByText("Where do we have dinner?")).toBeVisible();
+});
+
+test("a room widget points to the builder for editing, without asking for more", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME, app: "lunch" }, state: [appState("lunch", poll)] });
+    await expect(w.frameLocator("iframe.app-frame").getByText("Where do we have lunch?")).toBeVisible();
+    const hint = w.getByText(/open Widget Builder in this room and choose Apps → Edit/);
+    await expect(hint).toBeHidden();
+    await w.getByText("Edit", { exact: true }).click();
+    await expect(hint).toBeVisible();
+    await expect(hint).toContainText('To change "Lunch poll"');
+    // A pointer only: no navigate or widget-reading capability, nothing sent.
+    const caps = await page.evaluate(() => (window as unknown as { __REQUESTED_CAPABILITIES__: string[] }).__REQUESTED_CAPABILITIES__);
+    expect(caps).toHaveLength(4);
+    expect(caps.some((c) => c.includes("navigate") || c.includes(WIDGETS))).toBe(false);
+    expect(await sent(page)).toHaveLength(0);
 });
 
 test("reports an app's runtime error", async ({ page }) => {

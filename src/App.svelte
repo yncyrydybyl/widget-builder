@@ -90,6 +90,13 @@
             {#key `${runner.base}${runner.html}`}
                 <AppFrame {c} html={runner.html} appId={runner.id} events={c.events[runner.id] ?? []} title={runner.name} fit={false} base={runner.base} />
             {/key}
+            <!-- Only a pointer, on purpose (#6): editing here would need send.state_event in
+                 a widget everyone opens, and neither host lets a widget open another one
+                 (MSC2931 navigate only switches rooms; the Player has no navigate at all). -->
+            <details class="edit-hint">
+                <summary>Edit</summary>
+                <p>To change "{runner.name}", open <strong>Widget Builder</strong> in this room and choose <strong>Apps → Edit</strong>. A published update shows up here by itself.</p>
+            </details>
         {:else if c.room === "no-permission"}
             <p class="note warn">This app needs permission to read apps in this room.</p>
         {:else}

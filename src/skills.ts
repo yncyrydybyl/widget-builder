@@ -214,19 +214,33 @@ export function parseSettings(answer: string, t: Template): Settings | null {
         return null;
     }
     if (!raw || typeof raw !== "object" || raw.custom) return null;
+    const checked = checkSettings(raw, t);
+    return typeof checked === "string" ? null : checked;
+}
+
+/**
+ * Settings checked against the template's: the same keys with the same kinds of
+ * values, trimmed and cut to length. A missing key keeps the template's value.
+ * The model's answers and the settings form both go through here; a string says
+ * what is wrong.
+ */
+export function checkSettings(raw: Record<string, unknown>, t: Template): Settings | string {
+    const defaults = defaultSettings(t);
+    if (!defaults) return `The ${t.label.toLowerCase()} template has no settings.`;
     const out: Settings = {};
     for (const [key, fallback] of Object.entries(defaults)) {
         const v = raw[key];
         if (v === undefined) out[key] = fallback;
         else if (Array.isArray(fallback)) {
-            if (!Array.isArray(v)) return null;
+            if (!Array.isArray(v)) return `"${key}" must be a list.`;
             const items = [...new Set(v.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean))].map((x) => x.slice(0, 80));
-            if (items.length < (key === "choices" ? 1 : 2) || items.length > 20) return null;
-            if (key === "colors" && !items.every(isColor)) return null;
+            const min = key === "choices" ? 1 : 2;
+            if (items.length < min || items.length > 20) return `"${key}" needs ${min} to 20 entries.`;
+            if (key === "colors" && !items.every(isColor)) return `"${key}" must be colours written as #rrggbb.`;
             out[key] = items;
         } else {
-            if (typeof v !== "string" || !v.trim()) return null;
-            if (key === "target" && isNaN(new Date(v).getTime())) return null;
+            if (typeof v !== "string" || !v.trim()) return `"${key}" must not be empty.`;
+            if (key === "target" && isNaN(new Date(v).getTime())) return `"${key}" must be a date and time.`;
             out[key] = v.trim().slice(0, 120);
         }
     }

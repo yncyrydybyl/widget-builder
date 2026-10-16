@@ -50,7 +50,7 @@ label.grow { flex: 1; min-width: 0; }
 label.check > span { color: var(--fg); }
 
 .model { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-select, input[type="text"], input[type="number"] {
+select, input[type="text"], input[type="number"], input[type="datetime-local"], textarea {
     font: inherit; color: var(--fg); background: var(--bg);
     border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0;
 }
@@ -100,6 +100,13 @@ header { flex-wrap: wrap; }
 .grow { flex: 1; min-width: 0; }
 .app-frame { width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 .code pre { max-height: 300px; overflow: auto; font-size: 11px; background: var(--card); padding: 8px; border-radius: 6px; margin: 0; }
+.code textarea { width: 100%; box-sizing: border-box; min-height: 220px; resize: vertical; font: 11px/1.4 ui-monospace, monospace; background: var(--card); }
+form.settings { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.settings label { flex-direction: column; align-items: stretch; gap: 2px; }
+.settings label > span { font-size: 13px; }
+.settings input, .settings textarea { flex: none; }
+.settings textarea { resize: vertical; }
+.edit-actions { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .publish { display: flex; gap: 8px; }
 .publish input { flex: 1; }
 

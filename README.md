@@ -39,6 +39,27 @@ change to it. **undo** goes back a version, and **new app** starts over.
 | Using an app | Actions are timeline events (`de.datanauten.widget_builder.event`, `{ app, data }`). Every member can send them, and they are encrypted in E2EE rooms. An app rebuilds its state by replaying them. Each app may send at most 5 in a burst, then one every 2 s. |
 | Own widget | Publishing also adds the app to the room as a widget of its own (`im.vector.modular.widgets`, state key `widget_builder_<app id>`). Its URL is this builder with `#/?app=<id>` and holds no code: the widget reads the app's HTML from the app's state event, so a new version shows up in the open widget by itself. That widget asks only to read **that one** state event (`receive.state_event:de.datanauten.widget_builder.app#<id>`) and the app's actions. The Apps tab can remove the widget or add it again; without the permission it copies an `/addwidget` command instead. |
 
+## Editing an app
+
+**Edit** in the Apps tab loads a published app back into the builder. Three ways to change it:
+
+- **Settings.** An app that is still a template with its own settings (most are) shows them as a
+  form: the poll's question and options, the board's columns, the countdown's date. Applying
+  them needs no model, so fixing a typo or adding an option works without the download or a GPU.
+  The values are checked by the same rules as the model's.
+- **Code.** The code view is editable. Applied code goes through the same checks and the same
+  click-through test as the model's.
+- **The model**, as for a new app: describe the change.
+
+While editing, the preview starts with the app's actions from the room (copies; nothing is sent),
+so you see whether the new version still reads what people already voted or added. **reset data**
+goes back to those. **undo** works for every kind of change. **Publish update** writes the next
+version to the same state event; when someone else published a newer version since you started
+editing, it says so and asks before replacing theirs.
+
+The app's own room widget has no edit button: it would need permission to write room state for
+everyone who opens the app.
+
 ## Does it need external calls?
 
 No, apart from downloading the model once. The model runs on your GPU, the apps are stored

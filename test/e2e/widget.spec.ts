@@ -298,3 +298,88 @@ test("an app that does not share what is typed goes back to the model with that 
     await expect(w.getByText("Asking the model to fix these problems…")).toHaveCount(2);
     await expect(w.getByText(/^Tried the app out: /)).toHaveCount(3);
 });
+
+test("edits a published app's settings without a model, previewing with the room's actions", async ({ page }) => {
+    const w = await open(page, {
+        params: { engine: "echo", matrix_user_id: ME },
+        state: [appState("lunch", poll)],
+        events: [action("$v1", "lunch", { vote: "Sushi" }, "@bob:example.org", 2)],
+    });
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await w.getByRole("button", { name: "Edit" }).click();
+    await expect(w.getByText(/Editing "Lunch poll" \(version 1\)\. Change its settings or code below/)).toBeVisible();
+
+    // The preview starts with the room's vote; no model is loaded.
+    const app = w.frameLocator("iframe.app-frame");
+    await expect(app.getByText("1 voted: bob")).toBeVisible();
+    await expect(w.getByText("actions here stay local, starting with the room's 1 action")).toBeVisible();
+
+    // Settings that do not fit the template are refused with the reason.
+    await w.getByRole("textbox", { name: "options" }).fill("Pizza\n\n");
+    await w.getByRole("button", { name: "Apply settings" }).click();
+    await expect(w.getByText('"options" needs 2 to 20 entries.')).toBeVisible();
+
+    await w.getByRole("textbox", { name: "options" }).fill("Pizza\nSushi\nPasta");
+    await w.getByRole("button", { name: "Apply settings" }).click();
+    await expect(w.getByText("Changed the settings by hand, no code changed.")).toBeVisible();
+    await expect(app.getByRole("button", { name: /Pasta/ })).toBeVisible();
+    await expect(app.getByText("1 voted: bob")).toBeVisible();
+
+    // Trying it out stays local; reset goes back to the room's actions.
+    await app.getByRole("button", { name: /Pasta/ }).click();
+    await expect(app.getByText("2 voted: bob, alice")).toBeVisible();
+    await w.getByRole("button", { name: "reset data" }).click();
+    await expect(app.getByText("1 voted: bob")).toBeVisible();
+    expect((await sent(page)).filter((e) => e.type === EVENT)).toHaveLength(0);
+
+    await w.getByRole("button", { name: "Publish update" }).click();
+    await expect(w.getByText(/Published "Lunch poll" \(version 2\)/)).toBeVisible();
+    const states = (await sent(page)).filter((e) => e.type === APP);
+    expect(states).toHaveLength(1);
+    expect(states[0]).toMatchObject({ state_key: "lunch", content: { name: "Lunch poll", version: 2 } });
+    expect(String(states[0].content.html)).toContain('"options":["Pizza","Sushi","Pasta"]');
+});
+
+test("edits an app's code by hand, with the same checks as the model's code", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("lunch", poll)] });
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await w.getByRole("button", { name: "Edit" }).click();
+    await w.getByText(/^Code \(/).click();
+    const code = w.getByRole("textbox", { name: "Code" });
+    await expect(code).toHaveValue(poll);
+
+    await code.fill(poll.replaceAll("Where do we have lunch?", "Where do we have dinner?"));
+    await w.getByRole("button", { name: "Apply code" }).click();
+    await expect(w.getByText("Changed the code by hand.", { exact: true })).toBeVisible();
+    await expect(w.getByText("Tried the app out: it works.")).toBeVisible();
+    await expect(w.frameLocator("iframe.app-frame").getByRole("heading", { name: "Where do we have dinner?" })).toBeVisible();
+
+    await code.fill(poll.replace("</body>", '<script>fetch("https://example.org")</script></body>'));
+    await w.getByRole("button", { name: "Apply code" }).click();
+    await expect(w.getByText("Changed the code by hand. It has problems:")).toBeVisible();
+    await expect(w.getByText(/It uses the network/).first()).toBeVisible();
+
+    // Undo goes back a version, and the editor follows.
+    await w.getByRole("button", { name: "undo" }).click();
+    await expect(code).toHaveValue(/Where do we have dinner\?/);
+    await expect(code).not.toHaveValue(/fetch\(/);
+});
+
+test("warns before replacing a version someone else published while editing", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("lunch", poll)] });
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await w.getByRole("button", { name: "Edit" }).click();
+    await w.getByRole("textbox", { name: "question" }).fill("Lunch where?");
+    await w.getByRole("button", { name: "Apply settings" }).click();
+
+    const theirs = { ...appState("lunch", poll), sender: "@carol:example.org", event_id: "$v2", content: { name: "Lunch poll", html: poll, version: 2 } };
+    await page.evaluate((e) => (window as unknown as { __pushState: (s: unknown[]) => void }).__pushState(e), [theirs]);
+    await w.getByRole("button", { name: "Publish update" }).click();
+    await expect(w.getByText(/carol published version 2 of this app while you were editing/)).toBeVisible();
+    expect((await sent(page)).filter((e) => e.type === APP)).toHaveLength(0);
+
+    await w.getByRole("button", { name: "Publish anyway" }).click();
+    await expect(w.getByText(/Published "Lunch poll" \(version 3\)/)).toBeVisible();
+    expect((await sent(page)).filter((e) => e.type === APP)).toHaveLength(1);
+    await expect(w.getByText(/while you were editing/)).toHaveCount(0);
+});

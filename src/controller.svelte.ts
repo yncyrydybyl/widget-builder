@@ -7,7 +7,7 @@ import type { IRoomEvent, WidgetApi } from "matrix-widget-api";
 import { APP_TYPE, Bucket, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent } from "./apps";
 import { stripThinking, type ChatMessage } from "./chat";
 import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadModel, webGpuStatus, type ChatOptions, type Engine, type ModelInfo } from "./llm";
-import { TEMPLATES, applySettings, buildMessages, buildSettingsMessages, defaultSettings, parseSettings, pickTemplate, settingsOf, type Settings as AppSettings, type Task, type Template } from "./skills";
+import { TEMPLATES, applySettings, buildMessages, checkSettings, buildSettingsMessages, defaultSettings, parseSettings, pickTemplate, settingsOf, type Settings as AppSettings, type Task, type Template } from "./skills";
 import { judgeProbe, probeApp, type ProbeReport } from "./probe";
 import { capabilitiesFor, connect, initialTheme, readParams, type Params } from "./widget-connect";
 
@@ -29,6 +29,14 @@ export interface Draft {
     /** Set when editing a published app: publishing updates it. */
     appId: string | null;
     name: string;
+    /** The app's version this draft started from; a newer one in the room is a conflict. */
+    baseVersion: number | null;
+}
+
+/** Someone else published the app while it was being edited here. */
+export interface Conflict {
+    version: number;
+    author: string;
 }
 
 interface Settings {
@@ -106,6 +114,12 @@ export class Controller {
     events = $state<Record<string, AppEvent[]>>({});
     /** Actions in the preview: local only, never sent. */
     previewEvents = $state<AppEvent[]>([]);
+    /** What the preview starts with: the room's actions when editing a published app. */
+    previewBase = $state<AppEvent[]>([]);
+    /** Counts preview resets: the preview reloads on each, an app cannot unlearn actions it has seen. */
+    previewRun = $state(0);
+    /** Set when publishing would replace a version someone else published meanwhile. */
+    conflict = $state<Conflict | null>(null);
     /** Apps that are also room widgets of their own: app id → widget name. */
     roomWidgets = $state<Record<string, string>>({});
     view = $state<"build" | "apps">("build");
@@ -509,9 +523,15 @@ export class Controller {
     private setDraft(html: string): void {
         if (this.draft) this.undoStack.push({ ...this.draft });
         const name = this.draft?.appId ? this.draft.name : titleOf(html) || this.draft?.name || "New app";
-        this.draft = { html, appId: this.draft?.appId ?? null, name };
+        this.draft = { html, appId: this.draft?.appId ?? null, name, baseVersion: this.draft?.baseVersion ?? null };
         this.draftError = null;
-        this.previewEvents = [];
+        this.resetPreviewData();
+    }
+
+    /** The preview's actions back to where they started: none, or the room's when editing. */
+    resetPreviewData(): void {
+        this.previewEvents = [...this.previewBase];
+        this.previewRun++;
     }
 
     undo(): void {
@@ -519,7 +539,7 @@ export class Controller {
         if (!prev) return;
         this.draft = prev;
         this.draftError = null;
-        this.previewEvents = [];
+        this.resetPreviewData();
         this.say("note", "Went back to the previous version.");
     }
 
@@ -528,22 +548,65 @@ export class Controller {
         this.draft = null;
         this.undoStack = [];
         this.draftError = null;
+        this.previewBase = [];
         this.previewEvents = [];
+        this.conflict = null;
         this.chat = [];
+    }
+
+    /**
+     * The settings form: the draft's template with new settings, no model needed.
+     * Checked like the model's settings; returns what is wrong, or null when applied.
+     */
+    changeSettings(raw: Record<string, unknown>): string | null {
+        const s = this.draft && settingsOf(this.draft.html);
+        if (!s || this.busy) return "These settings cannot be changed now.";
+        const checked = checkSettings(raw, s.template);
+        if (typeof checked === "string") return checked;
+        const html = applySettings(s.template, checked);
+        if (html === this.draft!.html) return null;
+        this.setDraft(html);
+        this.say("note", "Changed the settings by hand, no code changed.");
+        return null;
+    }
+
+    /** Code edited by hand: becomes the draft, then gets the same checks as the model's code. */
+    async changeCode(html: string): Promise<void> {
+        if (!this.draft || this.busy || html.trim() === this.draft.html.trim()) return;
+        this.busy = true;
+        try {
+            this.setDraft(html.trim());
+            const problems = checkHtml(this.draft.html);
+            this.say("note", problems.length ? "Changed the code by hand. It has problems:" : "Changed the code by hand.", { problems });
+            const found = await this.tryOut(this.draft.html);
+            if (problems.length || found.length) this.say("note", "Describe a fix, change the code again, or undo.");
+        } finally {
+            this.busy = false;
+        }
     }
 
     stop(): void {
         this.abort?.abort();
     }
 
-    /** Publishes the draft as a room state event: new, or a new version of the app it came from. */
-    async publish(name: string): Promise<void> {
+    /**
+     * Publishes the draft as a room state event: new, or a new version of the app it
+     * came from. When someone else published that app since this draft started,
+     * sets `conflict` instead, until called again with `force`.
+     */
+    async publish(name: string, force = false): Promise<void> {
         if (!this.draft || !this.api) return;
         const problems = checkHtml(this.draft.html).filter((p) => p.includes("limit"));
         if (problems.length) {
             this.notice = problems[0];
             return;
         }
+        const current = this.draft.appId ? this.apps.find((a) => a.id === this.draft!.appId) : undefined;
+        if (current && this.draft.baseVersion !== null && current.version > this.draft.baseVersion && !force) {
+            this.conflict = { version: current.version, author: current.author };
+            return;
+        }
+        this.conflict = null;
         let id = this.draft.appId;
         if (!id) {
             const base = slug(name);
@@ -560,7 +623,7 @@ export class Controller {
         }
         // Show it now; the host's state push confirms it.
         this.onState([{ type: APP_TYPE, state_key: id, sender: this.userId, origin_server_ts: Date.now(), content, event_id: "", room_id: "", unsigned: {} } as IRoomEvent]);
-        this.draft = { ...this.draft, appId: id, name: content.name };
+        this.draft = { ...this.draft, appId: id, name: content.name, baseVersion: content.version };
         this.notice = `Published "${content.name}" (version ${content.version}).`;
         // Every published app becomes a room widget too. Its URL only names the
         // app, so a new version needs no widget change unless the name changed.
@@ -613,13 +676,20 @@ export class Controller {
         }
     }
 
-    /** Loads a published app into the builder to change it. */
+    /**
+     * Loads a published app into the builder to change it. The preview starts with
+     * the app's actions from the room (copies, still local), so a change shows how
+     * it reads what people already did.
+     */
     edit(id: string): void {
         const app = this.apps.find((a) => a.id === id);
         if (!app) return;
         this.newApp();
-        this.draft = { html: app.html, appId: app.id, name: app.name };
-        this.say("note", `Editing "${app.name}" (version ${app.version}). Describe a change; publishing replaces it for everyone.`);
+        this.draft = { html: app.html, appId: app.id, name: app.name, baseVersion: app.version };
+        this.previewBase = (this.events[app.id] ?? []).map((e) => ({ ...e, app: "" }));
+        this.resetPreviewData();
+        const how = settingsOf(app.html) ? "Change its settings or code below" : "Change its code below";
+        this.say("note", `Editing "${app.name}" (version ${app.version}). ${how}, or describe a change to the model. Publishing replaces it for everyone.`);
         this.view = "build";
     }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TEMPLATES, applySettings, buildSettingsMessages, defaultSettings, parseSettings, settingsOf } from "./skills";
+import { TEMPLATES, applySettings, buildSettingsMessages, checkSettings, defaultSettings, parseSettings, settingsOf } from "./skills";
 import { titleOf } from "./apps";
 
 const poll = TEMPLATES.find((t) => t.id === "poll")!;
@@ -37,6 +37,22 @@ describe("settings-only mode", () => {
         // Changed code: not a settings-only app any more.
         expect(settingsOf(html.replace("miniapp.ready(render)", "miniapp.ready(() => render())"))).toBeNull();
         expect(settingsOf(TEMPLATES.find((t) => t.id === "blank")!.html)).toBeNull();
+    });
+
+    it("checks settings from the form and says what is wrong", () => {
+        // One option per line: blank lines and repeats drop out, the rest is trimmed.
+        expect(checkSettings({ title: " Lunch ", question: "Where?", options: ["Pizza", "", " Sushi ", "Pizza"] }, poll)).toEqual({
+            title: "Lunch",
+            question: "Where?",
+            options: ["Pizza", "Sushi"],
+        });
+        expect(checkSettings({ title: "Lunch", question: "  ", options: ["A", "B"] }, poll)).toBe('"question" must not be empty.');
+        expect(checkSettings({ title: "Lunch", question: "Where?", options: ["Pizza", ""] }, poll)).toBe('"options" needs 2 to 20 entries.');
+        const picker = TEMPLATES.find((t) => t.id === "picker")!;
+        expect(checkSettings({ choices: ["Anna"] }, picker)).toMatchObject({ choices: ["Anna"] });
+        const sketch = TEMPLATES.find((t) => t.id === "sketch")!;
+        expect(checkSettings({ colors: ["red", "#00f"] }, sketch)).toBe('"colors" must be colours written as #rrggbb.');
+        expect(checkSettings({}, TEMPLATES.find((t) => t.id === "blank")!)).toBe("The blank template has no settings.");
     });
 
     it("tells the model what the app does and when to ask for code", () => {

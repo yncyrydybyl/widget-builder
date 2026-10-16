@@ -2,13 +2,17 @@
     import AppFrame from "./AppFrame.svelte";
     import type { Controller } from "./controller.svelte";
     import { sizeMB } from "./llm";
-    import { TEMPLATES } from "./skills";
+    import { TEMPLATES, settingsOf } from "./skills";
 
     let { c }: { c: Controller } = $props();
 
     let draftText = $state("");
     let publishName = $state("");
     let copied = $state<string | null>(null);
+    /** The settings form and the code editor, refilled from the draft whenever it changes. */
+    let form = $state<Record<string, string>>({});
+    let settingsError = $state<string | null>(null);
+    let code = $state("");
 
     $effect(() => {
         document.documentElement.dataset.theme = c.theme;
@@ -17,6 +21,24 @@
     $effect(() => {
         publishName = c.draft?.name ?? "";
     });
+
+    const current = $derived(c.draft ? settingsOf(c.draft.html) : null);
+    $effect(() => {
+        const s = current?.settings ?? {};
+        form = Object.fromEntries(Object.entries(s).map(([k, v]) => [k, Array.isArray(v) ? v.join("\n") : v]));
+        settingsError = null;
+    });
+    $effect(() => {
+        code = c.draft?.html ?? "";
+    });
+
+    function saveSettings(e: SubmitEvent): void {
+        e.preventDefault();
+        if (!current) return;
+        const raw: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(current.settings)) raw[k] = Array.isArray(v) ? (form[k] ?? "").split("\n") : (form[k] ?? "");
+        settingsError = c.changeSettings(raw);
+    }
 
     const gb = (mb: number): string => (mb / 1000).toFixed(1);
     const embedded = $derived(c.room !== "standalone");
@@ -169,10 +191,10 @@
                 <section class="preview">
                     <div class="bar">
                         <b>Preview</b>
-                        <span class="small muted">actions here stay local</span>
+                        <span class="small muted">actions here stay local{c.previewBase.length ? `, starting with the room's ${c.previewBase.length} ${c.previewBase.length === 1 ? "action" : "actions"}` : ""}</span>
                         <span class="grow"></span>
                         <button type="button" class="link" onclick={() => c.undo()} disabled={!c.canUndo || c.busy}>undo</button>
-                        <button type="button" class="link" onclick={() => (c.previewEvents = [])}>reset data</button>
+                        <button type="button" class="link" onclick={() => c.resetPreviewData()}>reset data</button>
                         <button type="button" class="link" onclick={() => c.newApp()} disabled={c.busy}>new app</button>
                     </div>
                     {#if c.draftError}
@@ -181,12 +203,41 @@
                             <button type="button" onclick={() => c.fix()} disabled={c.busy || c.engineStatus !== "ready"}>Ask the model to fix it</button>
                         </p>
                     {/if}
-                    {#key c.draft.html}
+                    {#key `${c.previewRun}\u0000${c.draft.html}`}
                         <AppFrame {c} html={c.draft.html} appId={null} events={c.previewEvents} title="Preview" />
                     {/key}
+                    {#if current}
+                        <details class="settings" open={!!c.draft.appId}>
+                            <summary>Settings ({current.template.label.toLowerCase()} template)</summary>
+                            <form class="settings" onsubmit={saveSettings}>
+                                {#each Object.entries(current.settings) as [key, value] (key)}
+                                    <label>
+                                        <span>{key}{current.template.fields?.[key] ? `: ${current.template.fields[key]}` : ""}{Array.isArray(value) ? ", one per line" : ""}</span>
+                                        {#if Array.isArray(value)}
+                                            <textarea aria-label={key} rows={Math.min(8, Math.max(3, (form[key] ?? "").split("\n").length))} bind:value={form[key]} disabled={c.busy}></textarea>
+                                        {:else if key === "target" && /^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d)?$/.test(String(value))}
+                                            <input type="datetime-local" aria-label={key} bind:value={form[key]} disabled={c.busy} />
+                                        {:else}
+                                            <input type="text" aria-label={key} bind:value={form[key]} maxlength="120" disabled={c.busy} />
+                                        {/if}
+                                    </label>
+                                {/each}
+                                <div class="edit-actions">
+                                    <button type="submit" disabled={c.busy}>Apply settings</button>
+                                    <span class="small muted">No model needed; the template's code stays as it is.</span>
+                                </div>
+                                {#if settingsError}<p class="note warn">{settingsError}</p>{/if}
+                            </form>
+                        </details>
+                    {/if}
                     <details class="code">
                         <summary>Code ({c.draft.html.length} characters)</summary>
-                        <pre>{c.draft.html}</pre>
+                        <textarea aria-label="Code" spellcheck="false" bind:value={code} disabled={c.busy}></textarea>
+                        <div class="edit-actions">
+                            <button type="button" onclick={() => c.changeCode(code)} disabled={c.busy || code.trim() === c.draft.html.trim()}>Apply code</button>
+                            <button type="button" class="link" onclick={() => (code = c.draft?.html ?? "")} disabled={code === c.draft.html}>discard</button>
+                            <span class="small muted">Checked and tried out like the model's code.</span>
+                        </div>
                     </details>
                     {#if embedded}
                         <form class="publish" onsubmit={(e) => { e.preventDefault(); void c.publish(publishName); }}>
@@ -195,6 +246,14 @@
                                 {c.draft.appId ? "Publish update" : "Publish to room"}
                             </button>
                         </form>
+                        {#if c.conflict}
+                            <p class="note warn">
+                                {name(c.conflict.author)} published version {c.conflict.version} of this app while you were editing. Publishing replaces their
+                                version with yours.
+                                <button type="button" onclick={() => c.publish(publishName, true)} disabled={c.busy}>Publish anyway</button>
+                                <button type="button" class="link" onclick={() => (c.conflict = null)}>cancel</button>
+                            </p>
+                        {/if}
                     {/if}
                 </section>
             {/if}

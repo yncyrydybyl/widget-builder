@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APP_TYPE, BASE_CSS, BRIDGE, Bucket, EVENT_TYPE, accentOf, checkHtml, extractHtml, slug, titleOf, toApp, toAppEvent, withAccent, withBridge } from "./apps";
+import { APP_TYPE, BASE_CSS, BASE_SINCE, BRIDGE, Bucket, EVENT_TYPE, accentOf, checkHtml, extractHtml, slug, titleOf, toApp, toAppEvent, withAccent, withBridge } from "./apps";
 import { TEMPLATES, buildMessages, pickTemplate } from "./skills";
 import { isAck, prefillRounds } from "./chat";
 
@@ -10,6 +10,14 @@ describe("apps in room state", () => {
     it("reads apps and treats empty content as removed", () => {
         expect(toApp(state("poll", { name: "Poll", html: "<html></html>", version: 2 }))).toMatchObject({ id: "poll", name: "Poll", version: 2, author: "@anna:x" });
         expect(toApp(state("poll", {}))).toBeNull();
+    });
+
+    it("tells apps from before the base stylesheet by the marker, else by their time", () => {
+        const at = (ts: number, content: Record<string, unknown>) => toApp({ ...(state("a", { html: "<html></html>", ...content }) as object), origin_server_ts: ts } as never)!.base;
+        expect(at(5, {})).toBe(false);
+        expect(at(BASE_SINCE - 1, {})).toBe(false);
+        expect(at(BASE_SINCE, {})).toBe(true);
+        expect(at(5, { base: 1 })).toBe(true);
     });
 
     it("reads app events", () => {
@@ -125,5 +133,12 @@ describe("the look of apps", () => {
         expect(doc.indexOf(BASE_CSS)).toBeGreaterThan(-1);
         expect(doc.indexOf(BASE_CSS)).toBeLessThan(doc.indexOf("button{color:red}"));
         expect(doc).toContain('<style id="miniapp-theme"></style>');
+    });
+
+    it("runs an app from before 0.3.0 as it was made: no base styles", () => {
+        const doc = withBridge("<!doctype html><html><head><style>button{color:red}</style></head><body></body></html>", "", false);
+        expect(doc).not.toContain(BASE_CSS);
+        expect(doc).not.toContain("miniapp-theme\"></style>");
+        expect(doc).toContain("window.miniapp");
     });
 });

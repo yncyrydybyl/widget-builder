@@ -4,7 +4,7 @@
  * events. Reactive with runes; App.svelte renders it.
  */
 import type { IRoomEvent, WidgetApi } from "matrix-widget-api";
-import { APP_TYPE, Bucket, accentOf, withAccent, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent, type AppInfo } from "./apps";
+import { APP_TYPE, BASE_VERSION, Bucket, accentOf, withAccent, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent, type AppInfo } from "./apps";
 import { stripThinking, type ChatMessage } from "./chat";
 import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadModel, webGpuStatus, type ChatOptions, type Engine, type ModelInfo } from "./llm";
 import { TEMPLATES, applySettings, buildMessages, checkSettings, buildSettingsMessages, defaultSettings, parseSettings, pickTemplate, settingsOf, type Settings, type Task, type Template } from "./skills";
@@ -632,7 +632,7 @@ export class Controller {
             for (let n = 2; this.apps.some((a) => a.id === id); n++) id = `${base}-${n}`;
         }
         const previous = this.apps.find((a) => a.id === id);
-        const content = { name: name.trim() || id, description: "", html: this.draft.html, version: (previous?.version ?? 0) + 1 };
+        const content = { name: name.trim() || id, description: "", html: this.draft.html, version: (previous?.version ?? 0) + 1, base: BASE_VERSION };
         try {
             await this.api.sendStateEvent(APP_TYPE, id, content);
         } catch (e) {

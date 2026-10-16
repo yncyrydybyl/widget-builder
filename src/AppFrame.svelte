@@ -19,8 +19,18 @@
         events,
         title,
         fit = true,
-    }: { c: Controller; html: string; appId: string | null; events: AppEvent[]; title: string; /** Grow with the app's page. */ fit?: boolean } =
-        $props();
+        base = true,
+    }: {
+        c: Controller;
+        html: string;
+        appId: string | null;
+        events: AppEvent[];
+        title: string;
+        /** Grow with the app's page. */
+        fit?: boolean;
+        /** With the base stylesheet; false for an app published before 0.3.0. */
+        base?: boolean;
+    } = $props();
 
     let frame = $state<HTMLIFrameElement>();
     /** The app's page height, as its bridge reports it; capped so a runaway layout cannot grow forever. */
@@ -46,7 +56,7 @@
     function onMessage(e: MessageEvent): void {
         if (!frame || e.source !== frame.contentWindow || !e.data?.__miniapp) return;
         const m = e.data as { kind: string; data?: unknown; message?: string; height?: number };
-        if (m.kind === "sandbox-ready") post({ __miniappLoad: withBridge(html) });
+        if (m.kind === "sandbox-ready") post({ __miniappLoad: withBridge(html, "", base) });
         else if (m.kind === "hello") {
             post({ __miniapp: true, kind: "init", info: c.appInfo() });
             connected = true;

@@ -44,6 +44,21 @@ describe("model output", () => {
         for (const t of TEMPLATES) expect(checkHtml(t.html), t.id).toEqual([]);
     });
 
+    it("finds elements the script looks up but the page lacks", () => {
+        const page = (body: string, script: string) => `<!doctype html><html><body>${body}<script>${script}</script></body></html>`;
+        // The kanban crash: "Cannot set properties of null (setting 'innerHTML')".
+        expect(checkHtml(page('<div id="board"></div>', 'document.getElementById("columns").innerHTML = "";'))).toEqual([
+            'The script looks up the element with id "columns", but the page has no element with id="columns". Add it to the HTML, or use an id that exists.',
+        ]);
+        // The sketch crash: "canvas.getContext is not a function".
+        expect(checkHtml(page('<div id="canvas"></div>', 'const canvas = document.getElementById("canvas"); const ctx = canvas.getContext("2d");'))).toEqual([
+            '"canvas.getContext" is called on the <div id="canvas">, which is not a canvas. Make that element a <canvas>.',
+        ]);
+        expect(checkHtml(page("", 'const c = document.querySelector("canvas"); c.getContext("2d");'))[0]).toMatch(/no <canvas> element/);
+        // Ids made by code, or built at run time, are fine.
+        expect(checkHtml(page("", 'const d = document.createElement("div"); d.id = "late"; document.getElementById("late"); document.getElementById("row-" + 1);'))).toEqual([]);
+    });
+
     it("puts the bridge before the app's code", () => {
         const out = withBridge("<!doctype html><html><head><title>x</title></head><body><script>miniapp.on(()=>{})</script></body></html>");
         expect(out.indexOf("window.miniapp")).toBeLessThan(out.indexOf("miniapp.on(()"));
@@ -68,6 +83,7 @@ describe("skills", () => {
         expect(pickTemplate("Ein gemeinsames Glücksrad: Namen eingeben, drehen").id).toBe("picker");
         expect(pickTemplate("a guestbook").id).toBe("blank");
         expect(pickTemplate("a todo kanban board").id).toBe("kanban");
+        expect(pickTemplate("a sketch app for postcards").id).toBe("sketch");
     });
 
     it("builds a prompt with rules, API and template, request last", () => {

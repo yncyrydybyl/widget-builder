@@ -166,3 +166,27 @@ test("reports an app's runtime error", async ({ page }) => {
     await w2.getByRole("button", { name: "Open" }).click();
     await expect(w2.getByText(/Broken: .*undefinedThing/)).toBeVisible();
 });
+
+test("the drawing template shares strokes", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME } });
+    await w.getByRole("button", { name: "Load model" }).click();
+    await w.getByRole("textbox", { name: "App description" }).fill("a sketch app for postcards");
+    await w.getByRole("button", { name: "Build app" }).click();
+    await expect(w.getByText("Starting from the drawing template.")).toBeVisible();
+
+    const canvas = w.frameLocator("iframe.app-frame").locator("canvas");
+    const box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + 40, box.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 160, box.y + 90, { steps: 12 });
+    await page.mouse.up();
+    // The stroke came back through miniapp.on and is on the canvas.
+    const inked = await w.frameLocator("iframe.app-frame").locator("canvas").evaluate((c: HTMLCanvasElement) => {
+        const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+        let n = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
+        return n;
+    });
+    expect(inked).toBeGreaterThan(200);
+    await expect(w.getByText("Fix:")).toHaveCount(0);
+});

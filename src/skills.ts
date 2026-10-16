@@ -16,6 +16,7 @@ import kanban from "./skills/templates/kanban.html?raw";
 import picker from "./skills/templates/picker.html?raw";
 import poll from "./skills/templates/poll.html?raw";
 import scoreboard from "./skills/templates/scoreboard.html?raw";
+import sketch from "./skills/templates/sketch.html?raw";
 
 export interface Template {
     id: string;
@@ -41,7 +42,7 @@ export const TEMPLATES: Template[] = [
     {
         id: "kanban",
         label: "Kanban board",
-        keywords: ["kanban", "board", "trello", "columns", "column", "backlog", "sprint", "workflow", "spalten", "tafel"],
+        keywords: ["kanban", "board", "trello", "columns", "column", "backlog", "sprint", "workflow", "spalten"],
         html: kanban,
     },
     {
@@ -61,6 +62,12 @@ export const TEMPLATES: Template[] = [
         label: "Countdown",
         keywords: ["countdown", "timer", "deadline", "until", "release", "date", "clock", "frist"],
         html: countdown,
+    },
+    {
+        id: "sketch",
+        label: "Drawing",
+        keywords: ["sketch", "draw", "drawing", "paint", "painting", "canvas", "whiteboard", "doodle", "postcard", "postcards", "pictionary", "zeichnen", "zeichnung", "malen", "skizze", "postkarte", "tafel"],
+        html: sketch,
     },
     { id: "blank", label: "Blank", keywords: [], html: blank },
 ];

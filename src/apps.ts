@@ -100,7 +100,48 @@ export function checkHtml(html: string): string[] {
         problems.push("It uses browser storage, which is not available; keep shared state in miniapp events.");
     if (/\b(alert|confirm|prompt)\s*\(/.test(html)) problems.push("It uses alert/confirm/prompt, which are blocked; show messages in the page.");
     if (!/<\/html>\s*$/i.test(html.trim()) && !/<\/body>/i.test(html)) problems.push("The file looks cut off (no closing </html>).");
+    problems.push(...checkElements(html));
     return problems;
+}
+
+/**
+ * Elements the script looks up but the page does not have: the most common
+ * crash in small-model apps ("Cannot set properties of null", "getContext is not
+ * a function"). Found before the app runs, so the model gets the exact cause.
+ */
+export function checkElements(html: string): string[] {
+    const problems: string[] = [];
+    // Ids the page defines, in markup or from code (`el.id = "x"`, `setAttribute("id", "x")`).
+    const tags = new Map<string, string>();
+    for (const m of html.matchAll(/<([a-z][\w-]*)\b[^>]*?\bid\s*=\s*["']([^"']+)["']/gi)) tags.set(m[2], m[1].toLowerCase());
+    for (const m of html.matchAll(/\.id\s*=\s*["'`]([^"'`]+)["'`]|setAttribute\(\s*["']id["']\s*,\s*["'`]([^"'`]+)["'`]/g))
+        tags.set(m[1] ?? m[2], tags.get(m[1] ?? m[2]) ?? "?");
+    // Built ids (`"item-" + i`) cannot be checked; only literal ones are.
+    const looked = new Set<string>();
+    for (const m of html.matchAll(/getElementById\(\s*["'`]([^"'`$]+)["'`]\s*\)|querySelector(?:All)?\(\s*["'`]#([\w-]+)["'`]\s*\)/g))
+        looked.add(m[1] ?? m[2]);
+    const missing = [...looked].filter((id) => !tags.has(id));
+    for (const id of missing.slice(0, 3))
+        problems.push(`The script looks up the element with id "${id}", but the page has no element with id="${id}". Add it to the HTML, or use an id that exists.`);
+
+    // `x.getContext(...)` needs x to be a <canvas>.
+    if (/\.getContext\(/.test(html)) {
+        const vars = new Map<string, string>();
+        for (const m of html.matchAll(/(\w+)\s*=\s*document\.(?:getElementById\(\s*["']([\w-]+)["']|querySelector\(\s*["']#([\w-]+)["'])/g))
+            vars.set(m[1], m[2] ?? m[3]);
+        const created = /createElement\(\s*["']canvas["']\s*\)/.test(html);
+        const wrong: string[] = [];
+        for (const m of html.matchAll(/(\w+)\.getContext\(/g)) {
+            const id = vars.get(m[1]);
+            const tag = id ? tags.get(id) : undefined;
+            if (tag && tag !== "canvas" && tag !== "?")
+                wrong.push(`"${m[1]}.getContext" is called on the <${tag} id="${id}">, which is not a canvas. Make that element a <canvas>.`);
+        }
+        problems.push(...wrong);
+        if (!wrong.length && !/<canvas\b/i.test(html) && !created)
+            problems.push('The script calls getContext, but the page has no <canvas> element. Add <canvas id="canvas" width="600" height="400"></canvas>.');
+    }
+    return [...new Set(problems)];
 }
 
 /**

@@ -8,15 +8,17 @@
   "license": "AGPL-3.0-or-later",
   "packageManager": "pnpm@10.29.3",
   "scripts": {
-    "dev": "vite",
-    "dev:https": "HTTPS=1 vite",
-    "build": "vite build",
+    "dev": "pnpm vendor && vite",
+    "dev:https": "pnpm vendor && HTTPS=1 vite",
+    "build": "pnpm vendor && vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "test:e2e": "pnpm build && playwright test"
+    "test:e2e": "pnpm build && playwright test",
+    "vendor": "node scripts/vendor.mjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "^4.3.1",
     "@mlc-ai/web-llm": "^0.2.86",
     "matrix-widget-api": "^1.20.0"
   },

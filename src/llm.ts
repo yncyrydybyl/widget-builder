@@ -1,18 +1,21 @@
 /*
  * The model behind one small interface. `WebLlmEngine` runs a WebLLM model on the
- * local GPU in a worker; `EchoEngine` (fragment `engine=echo`) needs no GPU and
+ * local GPU in a worker; `TransformersEngine` runs an ONNX model through
+ * Transformers.js (for models WebLLM has no build of); `EchoEngine` (fragment `engine=echo`) needs no GPU and
  * exists for the mock-host tests and for trying the room plumbing quickly.
  */
 import { isAck, prefillRounds, type ChatMessage } from "./chat";
 
 export interface ModelInfo {
-    /** WebLLM model id without the quantisation suffix. */
+    /** WebLLM model id without the quantisation suffix, or our own id for a Transformers.js model. */
     id: string;
     label: string;
     /** Approximate download/VRAM in MB per quantisation, from WebLLM's prebuilt config. */
     f16MB: number;
     /** The f32 build, for GPUs without the shader-f16 extension; absent when WebLLM has none. */
     f32MB?: number;
+    /** Set for a Transformers.js model: the Hugging Face repo and the ONNX dtype per GPU kind. */
+    onnx?: { repo: string; f16: string; f32: string };
 }
 
 /** A curated subset of WebLLM's prebuilt models that fit an ordinary laptop GPU. */
@@ -21,6 +24,19 @@ export const MODELS: ModelInfo[] = [
     { id: "Qwen2.5-Coder-3B-Instruct", label: "Qwen 2.5 Coder 3B (needs a dedicated GPU)", f16MB: 2505, f32MB: 2894 },
     { id: "Qwen3.5-4B", label: "Qwen 3.5 4B (needs a dedicated GPU)", f16MB: 3868, f32MB: 4680 },
     { id: "Qwen2.5-Coder-7B-Instruct", label: "Qwen 2.5 Coder 7B (best, needs a big GPU)", f16MB: 5107, f32MB: 5900 },
+    /*
+     * Mixture of experts: 8.3B parameters, 1.5B active per token, so it runs at
+     * about the speed of a 1.5B model but must keep all weights in memory. Liquid
+     * does not recommend it for programming; it is here to be measured
+     * (test/real/bench.mjs). LFM Open License, not OSI.
+     */
+    {
+        id: "LFM2-8B-A1B",
+        label: "LFM2 8B-A1B, mixture of experts (experimental)",
+        f16MB: 4790,
+        f32MB: 5330,
+        onnx: { repo: "onnx-community/LFM2-8B-A1B-ONNX", f16: "q4f16", f32: "q4" },
+    },
 ];
 
 // 3B and up lost the device on a Radeon 860M (integrated) at any prompt part size.
@@ -41,6 +57,11 @@ export function availableModels(f16: boolean): ModelInfo[] {
 
 export function webLlmId(m: ModelInfo, f16: boolean): string {
     return `${m.id}-${f16 ? "q4f16_1" : "q4f32_1"}-MLC`;
+}
+
+/** The id the loaded engine reports: WebLLM's full id, or ours for a Transformers.js model. */
+export function engineId(m: ModelInfo, f16: boolean): string {
+    return m.onnx ? `${m.id}-${f16 ? m.onnx.f16 : m.onnx.f32}` : webLlmId(m, f16);
 }
 
 export function sizeMB(m: ModelInfo, f16: boolean): number {
@@ -104,13 +125,23 @@ export async function webGpuStatus(): Promise<GpuStatus> {
     }
 }
 
-export async function isCached(modelId: string): Promise<boolean> {
+export async function isCached(m: ModelInfo, f16: boolean): Promise<boolean> {
     try {
+        if (m.onnx) {
+            // Transformers.js keeps downloads in this Cache Storage bucket, one entry per file.
+            const file = `${m.onnx.repo}/resolve/main/onnx/model_${f16 ? m.onnx.f16 : m.onnx.f32}.onnx_data`;
+            const keys = await (await caches.open("transformers-cache")).keys();
+            return keys.some((k) => k.url.includes(file));
+        }
         const webllm = await import("@mlc-ai/web-llm");
-        return await webllm.hasModelInCache(modelId);
+        return await webllm.hasModelInCache(webLlmId(m, f16));
     } catch {
         return false;
     }
+}
+
+export function loadModel(m: ModelInfo, f16: boolean, onProgress: (p: Progress) => void, contextWindow?: number): Promise<Engine> {
+    return m.onnx ? loadTransformers(m, f16, onProgress) : loadWebLlm(webLlmId(m, f16), onProgress, contextWindow);
 }
 
 class WebLlmEngine implements Engine {
@@ -205,6 +236,80 @@ export async function loadWebLlm(modelId: string, onProgress: (p: Progress) => v
         worker.terminate();
         throw e;
     }
+}
+
+import type { TfRequest, TfResponse } from "./tf.worker";
+
+/**
+ * A Transformers.js model in its own worker. No prompt rounds: ONNX Runtime has
+ * no kept KV cache between calls here, so the prompt is processed in one pass
+ * (on an integrated GPU that needs a raised driver timeout, see README).
+ */
+class TransformersEngine implements Engine {
+    private lost: string | null = null;
+    private listener: ((m: TfResponse) => void) | null = null;
+
+    constructor(
+        readonly modelId: string,
+        private worker: Worker,
+    ) {
+        worker.onmessage = (e: MessageEvent<TfResponse>) => {
+            if (e.data.op === "error" && /device lost/i.test(e.data.message)) this.lost = e.data.message;
+            this.listener?.(e.data);
+        };
+    }
+
+    private send(req: TfRequest): void {
+        this.worker.postMessage(req);
+    }
+
+    async chat(messages: ChatMessage[], onText: (soFar: string) => void, opts: ChatOptions = {}): Promise<string> {
+        if (this.lost) throw new Error(this.lost);
+        const abort = (): void => this.send({ op: "stop" });
+        opts.signal?.addEventListener("abort", abort);
+        try {
+            return await new Promise<string>((resolve, reject) => {
+                let text = "";
+                this.listener = (m) => {
+                    if (m.op === "text") onText((text += m.text));
+                    else if (m.op === "done") {
+                        opts.onUsage?.({ promptTokens: m.promptTokens, completionTokens: m.completionTokens });
+                        resolve(text);
+                    } else if (m.op === "error") reject(new Error(m.message));
+                };
+                this.send({ op: "chat", messages, maxTokens: opts.maxTokens ?? 768 });
+            });
+        } finally {
+            this.listener = null;
+            opts.signal?.removeEventListener("abort", abort);
+        }
+    }
+
+    async unload(): Promise<void> {
+        this.worker.terminate();
+    }
+}
+
+async function loadTransformers(m: ModelInfo, f16: boolean, onProgress: (p: Progress) => void): Promise<Engine> {
+    const worker = new Worker(new URL("./tf.worker.ts", import.meta.url), { type: "module" });
+    try {
+        await new Promise<void>((resolve, reject) => {
+            worker.onmessage = (e: MessageEvent<TfResponse>) => {
+                const r = e.data;
+                if (r.op === "progress" && r.total > 0)
+                    onProgress({ fraction: r.loaded / r.total, text: `${(r.loaded / 1e9).toFixed(2)} of ${(r.total / 1e9).toFixed(2)} GB` });
+                else if (r.op === "ready") resolve();
+                else if (r.op === "error") reject(new Error(r.message));
+            };
+            const vendor = new URL("vendor/", window.location.href).href;
+            worker.postMessage({ op: "load", repo: m.onnx!.repo, dtype: f16 ? m.onnx!.f16 : m.onnx!.f32, vendor } satisfies TfRequest);
+        });
+    } catch (e) {
+        worker.terminate();
+        throw e;
+    }
+    // Takes over the worker's messages from here on.
+    return new TransformersEngine(engineId(m, f16), worker);
 }
 
 /** Answers with the template from the prompt, renamed. Deterministic, instant, no GPU. */

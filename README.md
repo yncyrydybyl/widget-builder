@@ -30,7 +30,7 @@ change to it. **undo** goes back a version, and **new app** starts over.
 
 | Part | What it is |
 |---|---|
-| Model | WebLLM on WebGPU, in a worker, with an 8k context window. Qwen 2.5 Coder 1.5B is the default and runs on integrated GPUs. 3B and 7B and Qwen 3.5 4B write better code but need a dedicated GPU; on a Radeon 860M, 3B lost the device at any prompt size. |
+| Model | WebLLM on WebGPU, in a worker, with an 8k context window. Qwen 2.5 Coder 1.5B is the default and runs on integrated GPUs; 3B, Qwen 3.5 4B and 7B are offered for dedicated GPUs. LFM2-8B-A1B (mixture of experts, experimental) runs through Transformers.js and ONNX Runtime on WebGPU instead (`src/tf.worker.ts`; the runtime is vendored into `public/vendor/`, never loaded from a CDN). |
 | Skills | `src/skills/`: the miniapp API, the rules, and eight working templates (poll, checklist, kanban board, random picker, scoreboard, countdown, drawing, blank). A new app always starts from the closest template; small models adapt working code much better than they write from scratch. |
 | Checks | Before an app runs, it is checked for network use, external files, browser storage, `alert` and a cut-off file. Problems go back to the model once, automatically. So does an error the preview reports when the app starts; after that, the "Ask the model to fix it" button does it. |
 | Sandbox | Apps run in `sandbox.html` inside `<iframe sandbox="allow-scripts">`: an opaque origin with its own CSP (inline code only, **no network**). An app cannot reach the widget, the user's account or storage. |
@@ -55,6 +55,28 @@ The cost of staying local is model quality. Tested on a Radeon 860M with Coder 1
   rounds catch some of it, not all.
 Adding a hosted model as an optional engine would raise the quality a lot, but it would send
 prompts to that provider and needs a key in the browser.
+
+## Which model on which machine
+
+`node test/real/bench.mjs` answers it for the machine it runs on. On a Radeon 860M (integrated,
+RDNA 3.5, shared memory), October 2026:
+
+| Model | Apps that work (of 4) | Time for all 4 |
+|---|---|---|
+| Qwen 2.5 Coder 1.5B | 3 | 3 min |
+| Qwen 2.5 Coder 3B | 3 | 7 min |
+| Qwen 3.5 4B | 3 | 12 min |
+| LFM2-8B-A1B | 2 | 3.5 min |
+| Qwen 2.5 Coder 7B | 0 | 32 min (one app timed out) |
+
+- **Integrated AMD GPUs on Linux reset during long prompts** (`VK_ERROR_DEVICE_LOST`) with the
+  driver's default job timeout: everything above 1.5B failed that way. Raising it
+  (`amdgpu.lockup_timeout=30000` as a kernel parameter) removed every reset. Without it the
+  widget reads prompts in parts and learns a safe part size per model.
+- **Bigger was not better here:** 3B and 4B built no more working apps, only slower.
+- **LFM2-8B-A1B is as fast as the 1.5B** (1.5B of its 8.3B parameters are active per token) but
+  not better at code, as Liquid says. It also copied the prompt's `<template>` tags around its
+  answer, which made every app blank until the extraction kept only the document.
 
 ## Limits
 

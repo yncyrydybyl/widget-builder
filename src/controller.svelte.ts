@@ -6,7 +6,7 @@
 import type { IRoomEvent, WidgetApi } from "matrix-widget-api";
 import { APP_TYPE, Bucket, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent } from "./apps";
 import { stripThinking } from "./chat";
-import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadWebLlm, webGpuStatus, webLlmId, type Engine, type ModelInfo } from "./llm";
+import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadModel, webGpuStatus, type Engine, type ModelInfo } from "./llm";
 import { TEMPLATES, buildMessages, pickTemplate, type Task } from "./skills";
 import { capabilitiesFor, connect, initialTheme, readParams, type Params } from "./widget-connect";
 
@@ -478,8 +478,9 @@ export class Controller {
             this.engine = null;
             this.engine = this.useEcho
                 ? new EchoEngine()
-                : await loadWebLlm(
-                      webLlmId(this.selected ?? this.models[0], this.f16),
+                : await loadModel(
+                      this.selected ?? this.models[0],
+                      this.f16,
                       (p) => {
                           this.progress = p.fraction;
                           this.progressText = p.text;
@@ -503,7 +504,7 @@ export class Controller {
 
     private async refreshCache(): Promise<void> {
         if (this.useEcho) return;
-        const entries = await Promise.all(this.models.map(async (m) => [m.id, await isCached(webLlmId(m, this.f16))] as const));
+        const entries = await Promise.all(this.models.map(async (m) => [m.id, await isCached(m, this.f16)] as const));
         this.cached = Object.fromEntries(entries);
     }
 }

@@ -27,6 +27,9 @@ describe("model output", () => {
     it("extracts the html block, the bare document, or nothing", () => {
         expect(extractHtml("Sure:\n```html\n<!doctype html><html><body>x</body></html>\n```\nDone.")).toBe("<!doctype html><html><body>x</body></html>");
         expect(extractHtml("```js\nlet a\n```\n```html\n<html><body>b</body></html>\n```")).toBe("<html><body>b</body></html>");
+        // LFM2 copies the prompt's wrapper tags around the file.
+        expect(extractHtml("```html\n<template name=\"poll\">\n<!doctype html>\n<html><body>p</body></html>\n</template>\n```")).toBe("<!doctype html>\n<html><body>p</body></html>");
+        expect(extractHtml("<rules>\n<template name=\"blank\">\n<!doctype html><html><body>q</body></html>\n</template></rules>")).toBe("<!doctype html><html><body>q</body></html>");
         // Cut off before the closing fence.
         expect(extractHtml("```html\n<html><body>c")).toBe("<html><body>c");
         expect(extractHtml("Here: <!doctype html><html><body>d</body></html> ok")).toBe("<!doctype html><html><body>d</body></html>");

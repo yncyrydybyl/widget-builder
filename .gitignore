@@ -6,3 +6,4 @@ test/real/*.png
 test/real/.profile/
 test/real/bench-results.json
 test/real/bench/
+public/vendor/

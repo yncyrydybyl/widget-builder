@@ -74,11 +74,21 @@ export function slug(name: string): string {
 export function extractHtml(answer: string): string | null {
     const blocks = [...answer.matchAll(/```(?:html)?[^\n]*\n([\s\S]*?)(?:```|$)/g)].map((m) => m[1].trim());
     const html = blocks.reverse().find((b) => /<(html|body|script|div)\b/i.test(b));
-    if (html) return html;
-    const start = answer.search(/<!doctype html|<html\b/i);
-    if (start === -1) return null;
-    const end = answer.toLowerCase().lastIndexOf("</html>");
-    return answer.slice(start, end === -1 ? undefined : end + 7).trim();
+    if (html) return onlyDocument(html);
+    return /<!doctype html|<html\b/i.test(answer) ? onlyDocument(answer) : null;
+}
+
+/**
+ * Just the document, from `<!doctype html>` (or `<html>`) to `</html>`. Some
+ * models copy the prompt's wrapper tags around it (`<template name="poll">`,
+ * `<rules>`), and a leading `<template>` makes the browser treat the whole app
+ * as inert: a blank page.
+ */
+function onlyDocument(text: string): string {
+    const start = text.search(/<!doctype html|<html\b/i);
+    if (start === -1) return text;
+    const end = text.toLowerCase().lastIndexOf("</html>");
+    return text.slice(start, end === -1 ? undefined : end + 7).trim();
 }
 
 /** The `<title>` of a document, for naming a new app. */

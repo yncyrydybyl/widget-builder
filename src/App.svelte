@@ -61,7 +61,7 @@
         {/if}
     </main>
 {:else}
-    <main>
+    <main data-busy={c.busy}>
         <header>
             <h1>Widget Builder</h1>
             <span class="pill {c.room}">

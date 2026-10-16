@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Countdown</title>
+<style>
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; text-align: center; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  #left { font-size: 40px; font-variant-numeric: tabular-nums; margin: 16px 0; }
+  #when, #by { color: var(--muted); font-size: 13px; }
+  form { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+  input { min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+  button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+</style>
+</head>
+<body>
+<h1 id="title">Release</h1>
+<p id="left">–</p>
+<p id="when"></p>
+<p id="by"></p>
+<form id="set">
+  <input id="name" placeholder="What" aria-label="What" maxlength="60">
+  <input id="date" type="datetime-local" aria-label="Date and time">
+  <button type="submit">Set</button>
+</form>
+<script>
+  // The target is shared: whoever sets it last decides, and everyone counts down to it.
+  let target = new Date("2026-12-01T09:00:00").getTime();
+  let label = "Release";
+
+  miniapp.on((ev) => {
+    const d = ev.data || {};
+    if (typeof d.target === "number") {
+      target = d.target;
+      if (typeof d.label === "string" && d.label) label = d.label;
+      document.getElementById("by").textContent = "set by " + miniapp.displayName(ev.sender);
+    }
+    render();
+  });
+
+  document.getElementById("set").onsubmit = (e) => {
+    e.preventDefault();
+    const when = new Date(document.getElementById("date").value).getTime();
+    if (!isNaN(when)) miniapp.send({ target: when, label: document.getElementById("name").value.trim() });
+  };
+
+  function render() {
+    document.getElementById("title").textContent = label;
+    document.getElementById("when").textContent = new Date(target).toLocaleString();
+    let s = Math.max(0, Math.floor((target - Date.now()) / 1000));
+    const days = Math.floor(s / 86400); s %= 86400;
+    const h = Math.floor(s / 3600); s %= 3600;
+    const m = Math.floor(s / 60); s %= 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    document.getElementById("left").textContent = target <= Date.now() ? "🎉 Now!" : days + "d " + pad(h) + ":" + pad(m) + ":" + pad(s);
+  }
+
+  setInterval(render, 1000);
+  miniapp.ready(render);
+</script>
+</body>
+</html>

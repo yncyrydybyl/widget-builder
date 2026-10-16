@@ -64,7 +64,9 @@ describe("skills", () => {
         expect(pickTemplate("shared shopping list").id).toBe("checklist");
         expect(pickTemplate("roll a dice for who pays").id).toBe("picker");
         expect(pickTemplate("points for our quiz game").id).toBe("scoreboard");
-        expect(pickTemplate("a clock").id).toBe("blank");
+        expect(pickTemplate("A countdown timer to the release on 1 December").id).toBe("countdown");
+        expect(pickTemplate("Ein gemeinsames Glücksrad: Namen eingeben, drehen").id).toBe("picker");
+        expect(pickTemplate("a guestbook").id).toBe("blank");
     });
 
     it("builds a prompt with rules, API and template, request last", () => {

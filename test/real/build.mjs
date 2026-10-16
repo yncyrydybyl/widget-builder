@@ -3,7 +3,7 @@
 import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
 
-const model = process.argv[2] ?? "Qwen2.5-Coder-3B-Instruct";
+const model = process.argv[2] ?? "Qwen2.5-Coder-1.5B-Instruct";
 const requests = (process.env.REQUESTS ?? "A poll: which day works for the team event? Monday to Friday|Add Saturday and Sunday as options||A countdown timer to the release on 1 December 2026 that everyone sees||Ein gemeinsames Glücksrad: Namen eingeben, drehen, alle sehen das Ergebnis").split("|");
 const server = spawn("node", ["test/e2e/server.mjs"], { stdio: "ignore" });
 await new Promise((r) => setTimeout(r, 800));
@@ -13,11 +13,11 @@ const browser = await chromium.launch({
     args: ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist"],
 });
 const page = await (await browser.newContext({ baseURL: "http://localhost:4184" })).newPage();
-page.on("console", (m) => m.type() === "error" && !/Failed to load resource/.test(m.text()) && console.log("console:", m.text().slice(0, 200)));
-await page.addInitScript(([model]) => {
+page.on("console", (m) => m.type() === "error" && !/Failed to load resource|CheckVkSuccess|GPUDeviceLostInfo/.test(m.text()) && console.log("console:", m.text().slice(0, 160)));
+await page.addInitScript(([model, ctx]) => {
     localStorage.setItem("widget-builder.settings", JSON.stringify({ modelId: model }));
-    window.__TEST_FIXTURE__ = { params: { matrix_user_id: "@alice:example.org" } };
-}, [model]);
+    window.__TEST_FIXTURE__ = { params: { matrix_user_id: "@alice:example.org", ...(ctx ? { ctx } : {}) } };
+}, [model, process.env.CTX]);
 await page.goto("/__test__/index.html");
 const w = page.frameLocator("iframe");
 const t0 = Date.now();
@@ -35,8 +35,17 @@ for (const req of requests) {
     const t1 = Date.now();
     await w.getByRole("textbox", { name: /App description|Change/ }).fill(req);
     await w.getByRole("button", { name: /Build app|Change app/ }).click();
-    await w.getByRole("button", { name: "Stop" }).waitFor({ state: "detached", timeout: 900_000 });
-    await page.waitForTimeout(1500);
+    await w.locator('main[data-busy="true"]').waitFor({ timeout: 10_000 });
+    const notes = setInterval(async () => {
+        const last = (await w.locator(".chat li").last().innerText().catch(() => "")).slice(0, 120);
+        if (last !== globalThis.__last) console.log(`   ${(globalThis.__last = last)}`);
+    }, 1000);
+    // Idle for 5 s in a row: an automatic fix may start right after the first answer.
+    for (let idle = 0; idle < 5; ) {
+        await page.waitForTimeout(1000);
+        idle = (await w.locator('main[data-busy="false"]').count()) ? idle + 1 : 0;
+    }
+    clearInterval(notes);
     const chat = await w.locator(".chat li").allInnerTexts();
     const err = await w.getByText("The app reported an error").count();
     let body = "(no preview)";

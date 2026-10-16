@@ -17,19 +17,22 @@ export interface ModelInfo {
 
 /** A curated subset of WebLLM's prebuilt models that fit an ordinary laptop GPU. */
 export const MODELS: ModelInfo[] = [
-    { id: "Qwen2.5-Coder-1.5B-Instruct", label: "Qwen 2.5 Coder 1.5B (fast, simple apps)", f16MB: 1630, f32MB: 1889 },
-    { id: "Qwen2.5-Coder-3B-Instruct", label: "Qwen 2.5 Coder 3B", f16MB: 2505, f32MB: 2894 },
-    { id: "Qwen3.5-4B", label: "Qwen 3.5 4B", f16MB: 3868, f32MB: 4680 },
+    { id: "Qwen2.5-Coder-1.5B-Instruct", label: "Qwen 2.5 Coder 1.5B (runs on integrated GPUs)", f16MB: 1630, f32MB: 1889 },
+    { id: "Qwen2.5-Coder-3B-Instruct", label: "Qwen 2.5 Coder 3B (needs a dedicated GPU)", f16MB: 2505, f32MB: 2894 },
+    { id: "Qwen3.5-4B", label: "Qwen 3.5 4B (needs a dedicated GPU)", f16MB: 3868, f32MB: 4680 },
     { id: "Qwen2.5-Coder-7B-Instruct", label: "Qwen 2.5 Coder 7B (best, needs a big GPU)", f16MB: 5107, f32MB: 5900 },
 ];
 
-export const DEFAULT_MODEL = "Qwen2.5-Coder-3B-Instruct";
+// 3B and up lost the device on a Radeon 860M (integrated) at any prompt part size.
+export const DEFAULT_MODEL = "Qwen2.5-Coder-1.5B-Instruct";
 
 /*
  * A generated app plus the reference material does not fit the prebuilt 4k
- * window. 16k costs a few hundred MB of KV cache on these models.
+ * window: the prompt is ~2k tokens, the answer up to 3k. 8k is enough; 16k made a
+ * Radeon 860M (shared memory) lose the device on the first prefill. `#/?ctx=`
+ * overrides it for experiments.
  */
-const CONTEXT_WINDOW = 16_384;
+const CONTEXT_WINDOW = 8_192;
 
 /** Models usable on this GPU: without shader-f16 only those with an f32 build. */
 export function availableModels(f16: boolean): ModelInfo[] {
@@ -176,7 +179,7 @@ class WebLlmEngine implements Engine {
     }
 }
 
-export async function loadWebLlm(modelId: string, onProgress: (p: Progress) => void): Promise<Engine> {
+export async function loadWebLlm(modelId: string, onProgress: (p: Progress) => void, contextWindow = CONTEXT_WINDOW): Promise<Engine> {
     const webllm = await import("@mlc-ai/web-llm");
     const worker = new Worker(new URL("./llm.worker.ts", import.meta.url), { type: "module" });
     try {
@@ -184,7 +187,7 @@ export async function loadWebLlm(modelId: string, onProgress: (p: Progress) => v
             worker,
             modelId,
             { initProgressCallback: (r) => onProgress({ fraction: r.progress, text: r.text }) },
-            { context_window_size: CONTEXT_WINDOW },
+            { context_window_size: contextWindow },
         );
         return new WebLlmEngine(modelId, engine, worker);
     } catch (e) {

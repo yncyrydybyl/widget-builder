@@ -39,6 +39,12 @@ interface Settings {
 const SETTINGS_KEY = "widget-builder.settings";
 const LOCAL_USER = "@you:local";
 const MIN_CHUNK = 300;
+/*
+ * Prompt part size before this GPU has shown its limit. Integrated GPUs (a
+ * Radeon 860M) lose the device on one long prefill even with a 1.5B model; reading
+ * in parts costs a few seconds on fast GPUs and saves a reset on slow ones.
+ */
+const FIRST_CHUNK = 2400;
 const MAX_GPU_RETRIES = 3;
 const isGpuLoss = (msg: string): boolean => /device (was )?lost|GPUBuffer|mapAsync|DEVICE_LOST/i.test(msg);
 
@@ -98,6 +104,8 @@ export class Controller {
     private nextLocal = 1;
     private buckets = new Map<string, Bucket>();
     private lastPromptChars = 0;
+    /** The draft already sent back automatically for a runtime error. */
+    private autoFixed: string | null = null;
 
     get model(): string {
         return this.engine?.modelId ?? "";
@@ -200,8 +208,15 @@ export class Controller {
     }
 
     reportAppError(appId: string | null, message: string): void {
-        if (appId === null) this.draftError = message;
-        else this.notice = `${this.apps.find((a) => a.id === appId)?.name ?? appId}: ${message}`;
+        if (appId === null) {
+            this.draftError = message;
+            // A fresh draft that fails at once goes back to the model by itself, once.
+            if (this.draft && !this.busy && this.autoFixed !== this.draft.html && this.engineStatus === "ready") {
+                this.autoFixed = this.draft.html;
+                this.say("note", "The app failed when it started; asking the model to fix it…");
+                void this.fix();
+            }
+        } else this.notice = `${this.apps.find((a) => a.id === appId)?.name ?? appId}: ${message}`;
     }
 
     private say(role: ChatEntry["role"], text: string, extra: Partial<ChatEntry> = {}): ChatEntry {
@@ -234,9 +249,11 @@ export class Controller {
 
     private async run(task: Task, gpuRetries = 0, repaired = false): Promise<void> {
         if (!this.engine) {
+            this.busy = false;
             this.say("note", "Load a model first.", { error: true });
             return;
         }
+        const depth = gpuRetries + (repaired ? 1 : 0);
         this.busy = true;
         const engine = this.engine;
         const entry = this.say("model", "", { lines: 0 });
@@ -250,9 +267,9 @@ export class Controller {
             this.lastPromptChars = messages.reduce((n, m) => n + m.content.length, 0);
             const raw = await engine.chat(messages, (soFar) => update({ text: "Writing the app…", lines: soFar.split("\n").length }), {
                 signal: this.abort.signal,
-                chunkChars: this.settings.chunks[engine.modelId],
+                chunkChars: this.settings.chunks[engine.modelId] ?? FIRST_CHUNK,
                 onRound: (i, of) => update({ text: `Reading the instructions (part ${i} of ${of})…` }),
-                maxTokens: 4000,
+                maxTokens: 3000,
                 temperature: 0.2,
             });
             const answer = stripThinking(raw);
@@ -262,12 +279,14 @@ export class Controller {
                 return;
             }
             const problems = checkHtml(html);
-            const summary = answer.slice(answer.lastIndexOf("```") + 3).trim() || "Done.";
+            // The sentence after the code block; nothing useful if the block never closed.
+            const fences = answer.match(/```/g)?.length ?? 0;
+            const after = fences >= 2 ? answer.slice(answer.lastIndexOf("```") + 3).trim() : "";
+            const summary = after.slice(0, 300) || (fences === 1 ? "The answer stopped before the end of the file." : "Done.");
             update({ text: summary, lines: html.split("\n").length, problems });
             this.setDraft(html);
             // One automatic repair round for problems we can detect without running it.
             if (problems.length && !repaired) {
-                this.busy = false;
                 this.say("note", "Asking the model to fix these problems…");
                 await this.run({ kind: "fix", error: problems.join("\n"), current: html }, 0, true);
             }
@@ -276,13 +295,19 @@ export class Controller {
             if (isGpuLoss(msg) && gpuRetries < MAX_GPU_RETRIES && !this.abort?.signal.aborted) {
                 update({ text: "The GPU reset; reloading the model and retrying in smaller parts…", lines: undefined });
                 await this.recoverFromGpuLoss(engine);
-                this.busy = false;
-                return this.run(task, gpuRetries + 1, repaired);
+                if (!this.engine) {
+                    update({ text: "The model could not be reloaded after a GPU reset.", error: true });
+                    return;
+                }
+                // Stays busy through the retry: run() takes over the flag.
+                return await this.run(task, gpuRetries + 1, repaired);
             }
             update({ text: msg, lines: undefined, error: true });
         } finally {
-            this.busy = false;
-            this.abort = null;
+            if (depth === 0) {
+                this.busy = false;
+                this.abort = null;
+            }
         }
     }
 
@@ -373,7 +398,7 @@ export class Controller {
 
     /** Device lost: halve the part size for this model, reload it. */
     private async recoverFromGpuLoss(lost: Engine): Promise<void> {
-        const current = Math.min(this.settings.chunks[lost.modelId] ?? Infinity, this.lastPromptChars || 16_000);
+        const current = Math.min(this.settings.chunks[lost.modelId] ?? FIRST_CHUNK, this.lastPromptChars || FIRST_CHUNK);
         this.settings.chunks[lost.modelId] = Math.max(MIN_CHUNK, Math.floor(current / 2));
         this.saveSettings();
         this.engine = null;
@@ -393,10 +418,14 @@ export class Controller {
             this.engine = null;
             this.engine = this.useEcho
                 ? new EchoEngine()
-                : await loadWebLlm(webLlmId(this.selected ?? this.models[0], this.f16), (p) => {
-                      this.progress = p.fraction;
-                      this.progressText = p.text;
-                  });
+                : await loadWebLlm(
+                      webLlmId(this.selected ?? this.models[0], this.f16),
+                      (p) => {
+                          this.progress = p.fraction;
+                          this.progressText = p.text;
+                      },
+                      Number(this.params.get("ctx")) || undefined,
+                  );
             this.engineStatus = "ready";
             void this.refreshCache();
         } catch (e) {

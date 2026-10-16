@@ -11,6 +11,7 @@ import api from "./skills/api.md?raw";
 import rules from "./skills/rules.md?raw";
 import blank from "./skills/templates/blank.html?raw";
 import checklist from "./skills/templates/checklist.html?raw";
+import countdown from "./skills/templates/countdown.html?raw";
 import picker from "./skills/templates/picker.html?raw";
 import poll from "./skills/templates/poll.html?raw";
 import scoreboard from "./skills/templates/scoreboard.html?raw";
@@ -39,25 +40,38 @@ export const TEMPLATES: Template[] = [
     {
         id: "picker",
         label: "Random picker",
-        keywords: ["random", "pick", "picker", "dice", "draw", "lottery", "wheel", "zufall", "würfel", "auslosen", "losen", "roulette", "who's next", "shuffle"],
+        keywords: ["random", "pick", "picker", "dice", "draw", "lottery", "wheel", "spin", "zufall", "zufällig", "würfel", "würfeln", "auslosen", "losen", "glücksrad", "rad", "drehen", "roulette", "who's next", "shuffle"],
         html: picker,
     },
     {
         id: "scoreboard",
         label: "Scoreboard",
-        keywords: ["score", "points", "scoreboard", "leaderboard", "game", "counter", "count", "tally", "punkte", "spiel", "zähler", "tournament", "turnier"],
+        keywords: ["score", "points", "scoreboard", "leaderboard", "game", "counter", "tally", "punkte", "punktestand", "spiel", "zähler", "tournament", "turnier"],
         html: scoreboard,
+    },
+    {
+        id: "countdown",
+        label: "Countdown",
+        keywords: ["countdown", "timer", "deadline", "until", "release", "date", "clock", "frist"],
+        html: countdown,
     },
     { id: "blank", label: "Blank", keywords: [], html: blank },
 ];
 
+/** Lower-case words, so "countdown" does not count as "count". */
+function words(text: string): Set<string> {
+    return new Set(text.toLowerCase().match(/[\p{L}\p{N}'-]+/gu) ?? []);
+}
+
 /** The template whose keywords best match the request; the blank one otherwise. */
 export function pickTemplate(request: string): Template {
     const text = request.toLowerCase();
+    const have = words(text);
     let best = TEMPLATES[TEMPLATES.length - 1];
     let bestScore = 0;
     for (const t of TEMPLATES) {
-        const score = t.keywords.filter((k) => text.includes(k)).length;
+        // Multi-word keywords match as phrases, single words as whole words.
+        const score = t.keywords.filter((k) => (k.includes(" ") ? text.includes(k) : have.has(k))).length;
         if (score > bestScore) {
             best = t;
             bestScore = score;

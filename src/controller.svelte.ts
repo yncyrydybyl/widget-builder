@@ -4,10 +4,10 @@
  * events. Reactive with runes; App.svelte renders it.
  */
 import type { IRoomEvent, WidgetApi } from "matrix-widget-api";
-import { APP_TYPE, Bucket, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent } from "./apps";
+import { APP_TYPE, Bucket, accentOf, withAccent, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent, type AppInfo } from "./apps";
 import { stripThinking, type ChatMessage } from "./chat";
 import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadModel, webGpuStatus, type ChatOptions, type Engine, type ModelInfo } from "./llm";
-import { TEMPLATES, applySettings, buildMessages, checkSettings, buildSettingsMessages, defaultSettings, parseSettings, pickTemplate, settingsOf, type Settings as AppSettings, type Task, type Template } from "./skills";
+import { TEMPLATES, applySettings, buildMessages, checkSettings, buildSettingsMessages, defaultSettings, parseSettings, pickTemplate, settingsOf, type Settings, type Task, type Template } from "./skills";
 import { judgeProbe, probeApp, type ProbeReport } from "./probe";
 import { capabilitiesFor, connect, initialTheme, readParams, type Params } from "./widget-connect";
 
@@ -39,7 +39,8 @@ export interface Conflict {
     author: string;
 }
 
-interface Settings {
+/** The builder's own preferences, kept in this browser. */
+interface Prefs {
     modelId: string;
     /** Per model: the largest prompt part this GPU prefills in one pass (see llm-widget). */
     chunks: Record<string, number>;
@@ -67,10 +68,10 @@ const isGpuLoss = (msg: string): boolean => /device (was )?lost|GPUBuffer|mapAsy
  */
 const STALL_MS = 90_000;
 
-function loadSettings(): Settings {
-    const defaults: Settings = { modelId: DEFAULT_MODEL, chunks: {} };
+function loadPrefs(): Prefs {
+    const defaults: Prefs = { modelId: DEFAULT_MODEL, chunks: {} };
     try {
-        const s = { ...defaults, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as Partial<Settings>) };
+        const s = { ...defaults, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as Partial<Prefs>) };
         if (!MODELS.some((m) => m.id === s.modelId)) s.modelId = DEFAULT_MODEL;
         return s;
     } catch {
@@ -91,7 +92,7 @@ export class Controller {
     theme = $state<"light" | "dark">(initialTheme(this.params));
     room = $state<RoomStatus>("connecting");
     missing = $state<string[]>([]);
-    settings = $state<Settings>(loadSettings());
+    settings = $state<Prefs>(loadPrefs());
 
     engineStatus = $state<EngineStatus>("idle");
     progress = $state(0);
@@ -153,6 +154,12 @@ export class Controller {
 
     get selected(): ModelInfo | undefined {
         return this.models.find((m) => m.id === this.settings.modelId);
+    }
+
+    /** A draft that is not in the room yet, or differs from its published version. */
+    get unsaved(): boolean {
+        if (!this.draft) return false;
+        return this.draft.html !== this.apps.find((a) => a.id === this.draft!.appId)?.html;
     }
 
     get canUndo(): boolean {
@@ -277,6 +284,12 @@ export class Controller {
         return this.chat[this.chat.length - 1];
     }
 
+    /** Changes a chat entry already shown (streamed text, a result). */
+    private patch(entry: ChatEntry, patch: Partial<ChatEntry>): void {
+        const i = this.chat.findIndex((e) => e.id === entry.id);
+        if (i !== -1) this.chat[i] = { ...this.chat[i], ...patch };
+    }
+
     /** A message in the build chat: a new app, or a change to the current draft. */
     async ask(request: string): Promise<void> {
         const text = request.trim();
@@ -321,10 +334,7 @@ export class Controller {
         this.busy = true;
         const engine = this.engine;
         const entry = this.say("model", "", { lines: 0 });
-        const update = (patch: Partial<ChatEntry>): void => {
-            const i = this.chat.findIndex((e) => e.id === entry.id);
-            if (i !== -1) this.chat[i] = { ...this.chat[i], ...patch };
-        };
+        const update = (patch: Partial<ChatEntry>): void => this.patch(entry, patch);
         this.abort = new AbortController();
         try {
             const messages = buildMessages(task, this.userId);
@@ -452,16 +462,13 @@ export class Controller {
      * settings, the code stays the template's. "code" when the request needs more
      * (or anything goes wrong): the caller then has the model write code.
      */
-    private async trySettings(template: Template, current: AppSettings, request: string): Promise<"done" | "stopped" | "code"> {
+    private async trySettings(template: Template, current: Settings, request: string): Promise<"done" | "stopped" | "code"> {
         if (!this.engine || !this.useSettings) return "code";
         const engine = this.engine;
         this.busy = true;
         this.abort = new AbortController();
         const entry = this.say("model", `Filling in the ${template.label.toLowerCase()}'s settings…`);
-        const update = (patch: Partial<ChatEntry>): void => {
-            const i = this.chat.findIndex((e) => e.id === entry.id);
-            if (i !== -1) this.chat[i] = { ...this.chat[i], ...patch };
-        };
+        const update = (patch: Partial<ChatEntry>): void => this.patch(entry, patch);
         try {
             const messages = buildSettingsMessages(template, current, request, this.userId);
             this.lastPromptChars = messages.reduce((n, m) => n + m.content.length, 0);
@@ -502,30 +509,40 @@ export class Controller {
         if (!this.useProbe) return [];
         const testing = this.say("note", "Trying the app out: typing, clicking…");
         const found = judgeProbe(await this.probe(html));
-        const i = this.chat.findIndex((e) => e.id === testing.id);
-        if (i !== -1)
-            this.chat[i] = {
-                ...this.chat[i],
-                text: found.length ? `Tried the app out: ${found.length === 1 ? "1 problem" : `${found.length} problems`}.` : "Tried the app out: it works.",
-                problems: found,
-            };
+        this.patch(testing, {
+            text: found.length ? `Tried the app out: ${found.length === 1 ? "1 problem" : `${found.length} problems`}.` : "Tried the app out: it works.",
+            problems: found,
+        });
         return found;
     }
 
     /** Uses the app once in a hidden sandbox (see probe.ts). */
     private probe(html: string): Promise<ProbeReport> {
+        return probeApp(html, this.appInfo());
+    }
+
+    /** What an app learns when it starts: who uses it, and the builder's theme and colours. */
+    appInfo(): AppInfo {
         const css = getComputedStyle(document.documentElement);
         const colors: Record<string, string> = {};
         for (const k of ["--bg", "--fg", "--muted", "--accent", "--accent-fg", "--card", "--line"]) colors[k] = css.getPropertyValue(k).trim();
-        return probeApp(html, this.userId, colors, this.theme);
+        return { user: { id: this.userId, name: /^@([^:]+)/.exec(this.userId)?.[1] ?? this.userId }, theme: this.theme, colors };
     }
 
-    private setDraft(html: string): void {
+    /** A new version of the draft. It keeps the draft's accent colour unless `accent` says otherwise. */
+    private setDraft(html: string, accent: string | null | undefined = undefined): void {
+        html = withAccent(html, accent !== undefined ? accent : (accentOf(html) ?? (this.draft && accentOf(this.draft.html))));
         if (this.draft) this.undoStack.push({ ...this.draft });
         const name = this.draft?.appId ? this.draft.name : titleOf(html) || this.draft?.name || "New app";
         this.draft = { html, appId: this.draft?.appId ?? null, name, baseVersion: this.draft?.baseVersion ?? null };
         this.draftError = null;
         this.resetPreviewData();
+    }
+
+    /** The app's accent colour; null goes back to the room client's. */
+    setAccent(accent: string | null): void {
+        if (!this.draft || this.busy || accentOf(this.draft.html) === accent) return;
+        this.setDraft(this.draft.html, accent);
     }
 
     /** The preview's actions back to where they started: none, or the room's when editing. */

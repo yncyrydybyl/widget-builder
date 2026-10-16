@@ -3,6 +3,7 @@
     import type { Controller } from "./controller.svelte";
     import { sizeMB } from "./llm";
     import { TEMPLATES, settingsOf } from "./skills";
+    import { ACCENTS, accentOf } from "./apps";
 
     let { c }: { c: Controller } = $props();
 
@@ -13,6 +14,16 @@
     let form = $state<Record<string, string>>({});
     let settingsError = $state<string | null>(null);
     let code = $state("");
+    /** An app action waiting for a second click: removing it, or editing it over an unpublished draft. */
+    let confirming = $state<{ id: string; action: "remove" | "edit" } | null>(null);
+
+    function edit(id: string): void {
+        if (c.unsaved && confirming?.id !== id) confirming = { id, action: "edit" };
+        else {
+            confirming = null;
+            c.edit(id);
+        }
+    }
 
     $effect(() => {
         document.documentElement.dataset.theme = c.theme;
@@ -77,7 +88,7 @@
         {#if runner}
             <!-- A new version of the app replaces the running one. -->
             {#key runner.html}
-                <AppFrame {c} html={runner.html} appId={runner.id} events={c.events[runner.id] ?? []} title={runner.name} />
+                <AppFrame {c} html={runner.html} appId={runner.id} events={c.events[runner.id] ?? []} title={runner.name} fit={false} />
             {/key}
         {:else if c.room === "no-permission"}
             <p class="note warn">This app needs permission to read apps in this room.</p>
@@ -115,7 +126,7 @@
                     <span>Model</span>
                     <select bind:value={c.settings.modelId} onchange={() => c.saveSettings()} disabled={c.engineStatus === "loading" || c.useEcho}>
                         {#each c.models as m (m.id)}
-                            <option value={m.id}>{m.label} · {gb(sizeMB(m, c.f16))} GB{c.cached[m.id] ? " · cached" : ""}</option>
+                            <option value={m.id}>{m.label} · {gb(sizeMB(m, c.f16))} GB · {c.cached[m.id] ? "downloaded" : m.needs}</option>
                         {/each}
                     </select>
                 </label>
@@ -146,11 +157,11 @@
                             <button type="button" class="chip" class:active={c.startFrom === t.id} onclick={() => (c.startFrom = t.id)}>{t.label}</button>
                         {/each}
                     </div>
-                    <ul class="examples">
+                    <div class="examples" role="group" aria-label="Examples">
                         {#each EXAMPLES as ex (ex)}
-                            <li><button type="button" class="link" onclick={() => (draftText = ex)}>{ex}</button></li>
+                            <button type="button" class="example" onclick={() => (draftText = ex)}>{ex}</button>
                         {/each}
-                    </ul>
+                    </div>
                 </div>
             {/if}
 
@@ -206,6 +217,29 @@
                     {#key `${c.previewRun}\u0000${c.draft.html}`}
                         <AppFrame {c} html={c.draft.html} appId={null} events={c.previewEvents} title="Preview" />
                     {/key}
+                    <div class="accents" role="group" aria-label="Colour">
+                        <span class="small muted">Colour</span>
+                        <button type="button" class="swatch auto" class:active={!accentOf(c.draft.html)} onclick={() => c.setAccent(null)} disabled={c.busy} aria-label="The room client's colour" title="The room client's colour"></button>
+                        {#each ACCENTS as a (a)}
+                            <button type="button" class="swatch" class:active={accentOf(c.draft.html) === a} style:background={a} onclick={() => c.setAccent(a)} disabled={c.busy} aria-label="Colour {a}" title={a}></button>
+                        {/each}
+                    </div>
+                    {#if embedded}
+                        <form class="publish" onsubmit={(e) => { e.preventDefault(); void c.publish(publishName); }}>
+                            <input type="text" bind:value={publishName} aria-label="App name" placeholder="App name" maxlength="60" />
+                            <button type="submit" disabled={c.busy || c.room !== "ready" || !publishName.trim()}>
+                                {c.draft.appId ? "Publish update" : "Publish to room"}
+                            </button>
+                        </form>
+                        {#if c.conflict}
+                            <p class="note warn">
+                                {name(c.conflict.author)} published version {c.conflict.version} of this app while you were editing. Publishing replaces their
+                                version with yours.
+                                <button type="button" onclick={() => c.publish(publishName, true)} disabled={c.busy}>Publish anyway</button>
+                                <button type="button" class="link" onclick={() => (c.conflict = null)}>cancel</button>
+                            </p>
+                        {/if}
+                    {/if}
                     {#if current}
                         <details class="settings" open={!!c.draft.appId}>
                             <summary>Settings ({current.template.label.toLowerCase()} template)</summary>
@@ -239,22 +273,7 @@
                             <span class="small muted">Checked and tried out like the model's code.</span>
                         </div>
                     </details>
-                    {#if embedded}
-                        <form class="publish" onsubmit={(e) => { e.preventDefault(); void c.publish(publishName); }}>
-                            <input type="text" bind:value={publishName} aria-label="App name" placeholder="App name" maxlength="60" />
-                            <button type="submit" disabled={c.busy || c.room !== "ready" || !publishName.trim()}>
-                                {c.draft.appId ? "Publish update" : "Publish to room"}
-                            </button>
-                        </form>
-                        {#if c.conflict}
-                            <p class="note warn">
-                                {name(c.conflict.author)} published version {c.conflict.version} of this app while you were editing. Publishing replaces their
-                                version with yours.
-                                <button type="button" onclick={() => c.publish(publishName, true)} disabled={c.busy}>Publish anyway</button>
-                                <button type="button" class="link" onclick={() => (c.conflict = null)}>cancel</button>
-                            </p>
-                        {/if}
-                    {/if}
+
                 </section>
             {/if}
         {:else}
@@ -269,7 +288,7 @@
                                 <span class="small muted">v{a.version} by {name(a.author)} · {(c.events[a.id] ?? []).length} actions{a.id in c.roomWidgets ? " · room widget" : ""}</span>
                             </div>
                             <button type="button" onclick={() => (c.running = c.running === a.id ? null : a.id)}>{c.running === a.id ? "Close" : "Open"}</button>
-                            <button type="button" class="secondary" onclick={() => c.edit(a.id)}>Edit</button>
+                            <button type="button" class="secondary" onclick={() => edit(a.id)}>Edit</button>
                             {#if a.id in c.roomWidgets}
                                 <button type="button" class="link" onclick={() => c.removeFromRoom(a.id)} title="Remove this app's own widget from the room">remove widget</button>
                             {:else if c.canAddWidgets}
@@ -277,7 +296,19 @@
                             {:else}
                                 <button type="button" class="link" onclick={() => copy(a.id)}>{copied === a.id ? "copied" : "copy /addwidget"}</button>
                             {/if}
-                            <button type="button" class="link danger" onclick={() => c.remove(a.id)}>remove</button>
+                            <button type="button" class="link danger" onclick={() => (confirming = { id: a.id, action: "remove" })}>remove</button>
+                            {#if confirming?.id === a.id}
+                                <p class="note warn confirm">
+                                    {#if confirming.action === "remove"}
+                                        Remove "{a.name}" for everyone in the room? Its actions stay in the room's history.
+                                        <button type="button" class="danger" onclick={() => { confirming = null; void c.remove(a.id); }}>Remove</button>
+                                    {:else}
+                                        Your draft in Build is not published. Editing "{a.name}" replaces it.
+                                        <button type="button" onclick={() => edit(a.id)}>Edit anyway</button>
+                                    {/if}
+                                    <button type="button" class="link" onclick={() => (confirming = null)}>cancel</button>
+                                </p>
+                            {/if}
                         </li>
                     {/each}
                 </ul>

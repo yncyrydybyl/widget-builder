@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APP_TYPE, BRIDGE, Bucket, EVENT_TYPE, checkHtml, extractHtml, slug, titleOf, toApp, toAppEvent, withBridge } from "./apps";
+import { APP_TYPE, BASE_CSS, BRIDGE, Bucket, EVENT_TYPE, accentOf, checkHtml, extractHtml, slug, titleOf, toApp, toAppEvent, withAccent, withBridge } from "./apps";
 import { TEMPLATES, buildMessages, pickTemplate } from "./skills";
 import { isAck, prefillRounds } from "./chat";
 
@@ -106,5 +106,24 @@ describe("acknowledgements", () => {
     it("tells a bare OK from an answer", () => {
         for (const t of ["OK", "ok.", " Ok! ", "**OK**"]) expect(isAck(t), t).toBe(true);
         for (const t of ["OK, here is the app: ```html", "Okay", "Done."]) expect(isAck(t), t).toBe(false);
+    });
+});
+
+describe("the look of apps", () => {
+    it("sets, replaces and removes an app's accent colour on its <html> tag only", () => {
+        const html = '<!doctype html>\n<html lang="en">\n<head></head><body><p data-accent="#000000">x</p></body></html>';
+        const red = withAccent(html, "#d6336c");
+        expect(accentOf(red)).toBe("#d6336c");
+        expect(red).toContain('<html data-accent="#d6336c" lang="en">');
+        expect(accentOf(withAccent(red, "#2f6fde"))).toBe("#2f6fde");
+        expect(withAccent(red, null)).toBe(html);
+        expect(accentOf(html)).toBeNull();
+    });
+
+    it("puts the base styles in front of the app's own, so the app's win", () => {
+        const doc = withBridge("<!doctype html><html><head><style>button{color:red}</style></head><body></body></html>");
+        expect(doc.indexOf(BASE_CSS)).toBeGreaterThan(-1);
+        expect(doc.indexOf(BASE_CSS)).toBeLessThan(doc.indexOf("button{color:red}"));
+        expect(doc).toContain('<style id="miniapp-theme"></style>');
     });
 });

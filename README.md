@@ -30,14 +30,27 @@ change to it. **undo** goes back a version, and **new app** starts over.
 
 | Part | What it is |
 |---|---|
-| Model | WebLLM on WebGPU, in a worker, with an 8k context window. Qwen 2.5 Coder 1.5B is the default and runs on integrated GPUs; 3B, Qwen 3.5 4B and 7B are offered for dedicated GPUs. LFM2-8B-A1B (mixture of experts, experimental) runs through Transformers.js and ONNX Runtime on WebGPU instead (`src/tf.worker.ts`; the runtime is vendored into `public/vendor/`, never loaded from a CDN). |
+| Model | WebLLM on WebGPU, in a worker, with an 8k context window. Qwen 2.5 Coder 1.5B is the default and runs on integrated GPUs; 3B, Qwen 3.5 4B and 7B are offered for dedicated GPUs. |
 | Skills | `src/skills/`: the miniapp API, the rules, and eight working templates (poll, checklist, kanban board, random picker, scoreboard, countdown, drawing, blank). A new app always starts from the closest template; small models adapt working code much better than they write from scratch. |
 | Checks | Before an app runs, it is checked for network use, external files, browser storage, `alert` and a cut-off file. Problems go back to the model once, automatically. So does an error the preview reports when the app starts; after that, the "Ask the model to fix it" button does it. |
 | Sandbox | Apps run in `sandbox.html` inside `<iframe sandbox="allow-scripts">`: an opaque origin with its own CSP (inline code only, **no network**). An app cannot reach the widget, the user's account or storage. |
-| Bridge | `window.miniapp` (`ready`, `send`, `on`, `displayName`), injected in front of the app's code. The builder adds the real sender to every event, so an app cannot act as someone else. |
+| Bridge | `window.miniapp` (`ready`, `send`, `on`, `displayName`, `avatar`, `color`), injected in front of the app's code with the base styles (see "How apps look"). The builder adds the real sender to every event, so an app cannot act as someone else. |
 | Publishing | One room state event per app (`de.datanauten.widget_builder.app`, state key = app id, the HTML in the content, at most 48 KB). Everyone who joins sees it. Needs the power level for room settings, like adding a widget does. |
 | Using an app | Actions are timeline events (`de.datanauten.widget_builder.event`, `{ app, data }`). Every member can send them, and they are encrypted in E2EE rooms. An app rebuilds its state by replaying them. Each app may send at most 5 in a burst, then one every 2 s. |
 | Own widget | Publishing also adds the app to the room as a widget of its own (`im.vector.modular.widgets`, state key `widget_builder_<app id>`). Its URL is this builder with `#/?app=<id>` and holds no code: the widget reads the app's HTML from the app's state event, so a new version shows up in the open widget by itself. That widget asks only to read **that one** state event (`receive.state_event:de.datanauten.widget_builder.app#<id>`) and the app's actions. The Apps tab can remove the widget or add it again; without the permission it copies an `/addwidget` command instead. |
+
+## How apps look
+
+Every app gets a small stylesheet in front of its own CSS (`BASE_CSS` in `src/apps.ts`): plain
+headings, buttons, fields and lists already look finished, in the room client's colours, light
+or dark. A few classes cover what apps keep needing: `row`, `stack`, `grid`, `card`, `list`,
+`badge`, `meter`, `big`, `empty`, and quieter `secondary` and `ghost` buttons.
+`miniapp.avatar(userId)` gives a person's initial in their own colour. The templates are built
+on this, so apps need little CSS of their own: shorter for the model to write, and alike in the
+room.
+
+Under the preview, **Colour** gives an app its own accent colour (`<html data-accent>`), or
+leaves it with the client's. The frame grows with the app's page.
 
 ## Editing an app
 
@@ -87,7 +100,6 @@ RDNA 3.5, shared memory), October 2026:
 | Qwen 2.5 Coder 1.5B | 3 | 3 min |
 | Qwen 2.5 Coder 3B | 3 | 7 min |
 | Qwen 3.5 4B | 3 | 12 min |
-| LFM2-8B-A1B | 2 | 3.5 min |
 | Qwen 2.5 Coder 7B | 0 | 32 min (one app timed out) |
 
 - **Integrated AMD GPUs on Linux reset during long prompts** (`VK_ERROR_DEVICE_LOST`) with the
@@ -95,9 +107,8 @@ RDNA 3.5, shared memory), October 2026:
   (`amdgpu.lockup_timeout=30000` as a kernel parameter) removed every reset. Without it the
   widget reads prompts in parts and learns a safe part size per model.
 - **Bigger was not better here:** 3B and 4B built no more working apps, only slower.
-- **LFM2-8B-A1B is as fast as the 1.5B** (1.5B of its 8.3B parameters are active per token) but
-  not better at code, as Liquid says. It also copied the prompt's `<template>` tags around its
-  answer, which made every app blank until the extraction kept only the document.
+- **LFM2-8B-A1B** (mixture of experts, through Transformers.js) was as fast as the 1.5B but built
+  2 of 4 apps, and its ONNX runtime made the widget 26 MB bigger; it was removed in 0.3.0.
 
 ## Trying apps out before showing them
 

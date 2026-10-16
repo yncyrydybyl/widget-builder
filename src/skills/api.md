@@ -6,6 +6,7 @@ Every app gets `window.miniapp` before its own code runs:
 - `miniapp.send(data)` shares an action with everyone in the room. `data` is small JSON (under 4,000 characters) that describes *what happened*, for example `{ "vote": "pizza" }` or `{ "add": "Buy milk" }`. Never send the whole state.
 - `miniapp.on(fn)` calls `fn(event)` for every action, past ones first, then live ones, including your own. `event` is `{ id, sender, ts, data, mine }`; `sender` is the Matrix user id, and `mine` is true for the current user's actions.
 - `miniapp.displayName(userId)` turns `@anna:example.org` into `anna`.
+- `miniapp.avatar(userId)` returns a small round element with the person's initial in their own colour; `miniapp.color(userId)` is that colour, for your own elements.
 - `miniapp.user` and `miniapp.theme` ("light" or "dark") are also available after ready.
 
 ## State is a replay of actions

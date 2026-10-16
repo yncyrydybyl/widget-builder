@@ -26,6 +26,13 @@ export interface AppDoc {
     updated: number;
 }
 
+/** Sent to an app when it starts (the bridge's `init`). */
+export interface AppInfo {
+    user: { id: string; name: string };
+    theme: string;
+    colors: Record<string, string>;
+}
+
 export interface AppEvent {
     id: string;
     app: string;
@@ -155,6 +162,72 @@ export function checkElements(html: string): string[] {
 }
 
 /**
+ * Every app's starting look, in front of its own CSS: plain elements already
+ * look finished, and a few classes cover what apps keep needing (rows, cards,
+ * lists, badges, avatars, meters). Apps then need little CSS of their own,
+ * which keeps them short for a small model and alike in the room. The colours
+ * are the host's, set by the bridge, light or dark.
+ */
+export const BASE_CSS = `
+:root { --radius: 12px; --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent); --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 12px rgb(0 0 0 / 0.05); }
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+h1 { font-size: 20px; line-height: 1.25; margin: 0 0 14px; letter-spacing: -0.01em; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+p { margin: 0 0 10px; }
+small, .muted { color: var(--muted); }
+small { font-size: 12px; }
+button { font: inherit; font-weight: 600; min-height: 38px; padding: 0 16px; border: 1px solid transparent; border-radius: 10px; background: var(--accent); color: var(--accent-fg); cursor: pointer; transition: filter 0.15s, background 0.15s, transform 0.08s; }
+button:hover { filter: brightness(1.07); }
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.5; cursor: default; filter: none; transform: none; }
+button.secondary { background: var(--card); color: var(--fg); border-color: var(--line); }
+button.ghost { background: transparent; color: var(--muted); font-weight: 400; min-height: 30px; padding: 0 8px; }
+button.ghost:hover { background: var(--card); color: var(--fg); filter: none; }
+input, select, textarea { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; min-height: 38px; padding: 6px 12px; min-width: 0; }
+textarea { width: 100%; min-height: 84px; resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+input[type=checkbox], input[type=radio] { width: 18px; height: 18px; min-height: 0; padding: 0; accent-color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row > input:not([type=checkbox]):not([type=radio]) { flex: 1; }
+form.row { margin: 0 0 14px; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+.grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; box-shadow: var(--shadow); }
+.list { list-style: none; margin: 0; padding: 0; }
+.list > li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.list > li:last-child { border-bottom: 0; }
+.grow { flex: 1; min-width: 0; }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 9px; border-radius: 999px; background: var(--accent-soft); font-size: 12px; font-weight: 600; }
+.avatar { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; font-weight: 700; }
+.meter { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.meter > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 0.3s; }
+.big { font-size: 44px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.center { text-align: center; }
+.empty { text-align: center; color: var(--muted); padding: 20px 8px; }
+.appear { animation: miniapp-in 0.2s ease-out; }
+@keyframes miniapp-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+`;
+
+/** Accent colours offered for an app (`<html data-accent>`): readable on light and dark. */
+export const ACCENTS = ["#0b7a5f", "#2f6fde", "#7c4dce", "#d6336c", "#e8590c", "#d4a106", "#0c8599", "#495057"];
+
+/** The app's chosen accent colour, if any. */
+export function accentOf(html: string): string | null {
+    return /<html\b[^>]*\bdata-accent="(#[0-9a-f]{6})"/i.exec(html)?.[1] ?? null;
+}
+
+/** The app with this accent colour, or with the host's when null. */
+export function withAccent(html: string, accent: string | null): string {
+    return html.replace(/<html\b[^>]*>/i, (tag) => {
+        const rest = tag.replace(/\s+data-accent="[^"]*"/i, "");
+        return accent ? rest.replace(/^<html\b/i, `<html data-accent="${accent}"`) : rest;
+    });
+}
+
+/**
  * Runs inside the app's sandbox, before the app's own code. Gives the app
  * `window.miniapp` and talks to the builder over postMessage. The builder
  * attaches the sender to every event, so an app cannot pretend to be someone.
@@ -163,13 +236,31 @@ export const BRIDGE = `(() => {
   const listeners = [], events = [], readyCbs = [];
   let info = null;
   const post = (m) => parent.postMessage(Object.assign({ __miniapp: true }, m), "*");
+  // The host's colours as a rule, not inline styles, so an app's own CSS can override them.
+  function theme(colors) {
+    const vars = Object.assign({}, colors);
+    const accent = document.documentElement.dataset.accent;
+    if (/^#[0-9a-f]{6}$/i.test(accent || "")) {
+      const n = parseInt(accent.slice(1), 16), lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+      vars["--accent"] = accent;
+      vars["--accent-fg"] = lum > 0.6 ? "#111111" : "#ffffff";
+    }
+    document.getElementById("miniapp-theme").textContent = ":root { color-scheme: " + (info.theme === "dark" ? "dark" : "light") + "; " + Object.entries(vars).map(([k, v]) => k + ": " + v).join("; ") + "; }";
+  }
+  // The frame fits the app: report the page's height whenever it changes. The box, not
+  // scrollHeight, which never drops below the frame's own height.
+  let height = 0;
+  new ResizeObserver(() => {
+    const h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    if (Math.abs(h - height) > 1) post({ kind: "size", height: (height = h) });
+  }).observe(document.documentElement);
   addEventListener("message", (e) => {
     if (e.source !== parent || !e.data || !e.data.__miniapp) return;
     const m = e.data;
     if (m.kind === "init") {
       info = m.info;
       document.documentElement.dataset.theme = info.theme;
-      for (const [k, v] of Object.entries(info.colors)) document.documentElement.style.setProperty(k, v);
+      theme(info.colors);
       readyCbs.splice(0).forEach((f) => f(info));
     } else if (m.kind === "events") {
       for (const ev of m.events) {
@@ -194,13 +285,27 @@ export const BRIDGE = `(() => {
     on(cb) { listeners.push(cb); events.forEach((ev) => { try { cb(ev); } catch (err) { report(err); } }); },
     events() { return events.slice(); },
     displayName(id) { const m = /^@([^:]+)/.exec(id || ""); return m ? m[1] : id; },
+    color(id) {
+      let h = 0;
+      for (const ch of String(id || "")) h = (h * 31 + ch.codePointAt(0)) % 360;
+      return "hsl(" + h + " 60% " + (info && info.theme === "dark" ? 65 : 42) + "%)";
+    },
+    avatar(id) {
+      const el = document.createElement("span");
+      el.className = "avatar";
+      el.style.background = this.color(id);
+      el.style.color = info && info.theme === "dark" ? "#111111" : "#ffffff";
+      el.textContent = (this.displayName(id) || "?").slice(0, 1).toUpperCase();
+      el.title = this.displayName(id);
+      return el;
+    },
   };
   post({ kind: "hello" });
 })();`;
 
-/** The app document with the bridge (and any extra script, such as the probe) first. */
+/** The app document with the base styles and the bridge (and any extra script, such as the probe) first. */
 export function withBridge(html: string, extra = ""): string {
-    const tag = `<script>${BRIDGE}</script>${extra ? `<script>${extra}</script>` : ""}`;
+    const tag = `<style>${BASE_CSS}</style><style id="miniapp-theme"></style><script>${BRIDGE}</script>${extra ? `<script>${extra}</script>` : ""}`;
     if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`);
     if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${tag}</head>`);
     return `<!doctype html><html><head><meta charset="utf-8">${tag}</head><body>${html}</body></html>`;

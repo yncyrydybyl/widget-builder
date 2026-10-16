@@ -12,22 +12,25 @@
     import { withBridge, type AppEvent } from "./apps";
     import type { Controller } from "./controller.svelte";
 
-    let { c, html, appId, events, title }: { c: Controller; html: string; appId: string | null; events: AppEvent[]; title: string } = $props();
+    let {
+        c,
+        html,
+        appId,
+        events,
+        title,
+        fit = true,
+    }: { c: Controller; html: string; appId: string | null; events: AppEvent[]; title: string; /** Grow with the app's page. */ fit?: boolean } =
+        $props();
 
     let frame = $state<HTMLIFrameElement>();
+    /** The app's page height, as its bridge reports it; capped so a runaway layout cannot grow forever. */
+    let height = $state(0);
     let connected = $state(false);
     /** Event ids already in the app; events can be sorted into the middle of the list. */
     let delivered = new Set<string>();
     const src = new URL("sandbox.html", window.location.href).href;
 
     const post = (m: unknown): void => frame?.contentWindow?.postMessage(m, "*");
-
-    function colors(): Record<string, string> {
-        const css = getComputedStyle(document.documentElement);
-        const out: Record<string, string> = {};
-        for (const k of ["--bg", "--fg", "--muted", "--accent", "--accent-fg", "--card", "--line"]) out[k] = css.getPropertyValue(k).trim();
-        return out;
-    }
 
     function deliver(list: AppEvent[]): void {
         if (!connected) return;
@@ -42,16 +45,16 @@
 
     function onMessage(e: MessageEvent): void {
         if (!frame || e.source !== frame.contentWindow || !e.data?.__miniapp) return;
-        const m = e.data as { kind: string; data?: unknown; message?: string };
+        const m = e.data as { kind: string; data?: unknown; message?: string; height?: number };
         if (m.kind === "sandbox-ready") post({ __miniappLoad: withBridge(html) });
         else if (m.kind === "hello") {
-            const name = /^@([^:]+)/.exec(c.userId)?.[1] ?? c.userId;
-            post({ __miniapp: true, kind: "init", info: { user: { id: c.userId, name }, theme: c.theme, colors: colors() } });
+            post({ __miniapp: true, kind: "init", info: c.appInfo() });
             connected = true;
             delivered = new Set();
             deliver(events);
         } else if (m.kind === "send") void c.sendAppEvent(appId, m.data);
         else if (m.kind === "error" && m.message) c.reportAppError(appId, m.message);
+        else if (m.kind === "size" && typeof m.height === "number") height = Math.min(Math.max(m.height, 120), 1600);
     }
 
     $effect(() => {
@@ -62,4 +65,11 @@
     onDestroy(() => window.removeEventListener("message", onMessage));
 </script>
 
-<iframe bind:this={frame} class="app-frame" {src} sandbox="allow-scripts allow-forms" {title}></iframe>
+<iframe
+    bind:this={frame}
+    class="app-frame"
+    {src}
+    sandbox="allow-scripts allow-forms"
+    {title}
+    style:height={fit && height ? `${height + 2}px` : undefined}
+></iframe>

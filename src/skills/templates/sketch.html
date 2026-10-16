@@ -4,19 +4,16 @@
 <meta charset="utf-8">
 <title>Shared sketch</title>
 <style>
-  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-  .swatch { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--line); cursor: pointer; padding: 0; }
-  .swatch.active { border-color: var(--fg); }
-  button.clear { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; margin-left: auto; }
-  canvas { display: block; width: 100%; aspect-ratio: 3 / 2; background: #ffffff; border: 1px solid var(--line); border-radius: 10px; touch-action: none; cursor: crosshair; }
+  .swatch { width: 34px; height: 34px; min-height: 0; padding: 0; border-radius: 50%; border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--line); }
+  .swatch.active { box-shadow: 0 0 0 2px var(--fg); }
+  #clear { margin-left: auto; }
+  canvas { display: block; width: 100%; aspect-ratio: 3 / 2; margin-top: 10px; background: #ffffff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); touch-action: none; cursor: crosshair; }
 </style>
 </head>
 <body>
 <h1 id="heading">Shared sketch</h1>
-<div class="tools" id="tools">
-  <button class="clear" id="clear" type="button">Clear</button>
+<div class="row" id="tools">
+  <button class="secondary" id="clear" type="button">Clear</button>
 </div>
 <canvas id="canvas" width="900" height="600" aria-label="Drawing area"></canvas>
 <script>

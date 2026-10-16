@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TEMPLATES, applySettings, buildSettingsMessages, checkSettings, defaultSettings, parseSettings, settingsOf } from "./skills";
-import { titleOf } from "./apps";
+import { titleOf, withAccent } from "./apps";
 
 const poll = TEMPLATES.find((t) => t.id === "poll")!;
 
@@ -37,6 +37,8 @@ describe("settings-only mode", () => {
         // Changed code: not a settings-only app any more.
         expect(settingsOf(html.replace("miniapp.ready(render)", "miniapp.ready(() => render())"))).toBeNull();
         expect(settingsOf(TEMPLATES.find((t) => t.id === "blank")!.html)).toBeNull();
+        // An accent colour is a look, not code: still the template.
+        expect(settingsOf(withAccent(html, "#d6336c"))).toMatchObject({ template: { id: "poll" } });
     });
 
     it("checks settings from the form and says what is wrong", () => {

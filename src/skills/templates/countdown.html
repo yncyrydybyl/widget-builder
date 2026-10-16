@@ -4,21 +4,18 @@
 <meta charset="utf-8">
 <title>Countdown</title>
 <style>
-  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; text-align: center; }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  #left { font-size: 40px; font-variant-numeric: tabular-nums; margin: 16px 0; }
-  #when, #by { color: var(--muted); font-size: 13px; }
-  form { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
-  input { min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
-  button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+  #left { grid-template-columns: repeat(4, 1fr); margin: 8px 0 12px; }
+  #left .big { font-size: 34px; }
+  form.row { justify-content: center; margin-top: 16px; }
 </style>
 </head>
-<body>
+<body class="center">
 <h1 id="title">Release</h1>
-<p id="left">–</p>
-<p id="when"></p>
-<p id="by"></p>
-<form id="set">
+<div class="grid" id="left"></div>
+<p class="big appear" id="done" hidden>🎉 Now!</p>
+<p class="muted" id="when"></p>
+<p class="muted" id="by"></p>
+<form class="row" id="set">
   <input id="name" placeholder="What" aria-label="What" maxlength="60">
   <input id="date" type="datetime-local" aria-label="Date and time">
   <button type="submit">Set</button>
@@ -50,11 +47,22 @@
     document.getElementById("title").textContent = label;
     document.getElementById("when").textContent = new Date(target).toLocaleString();
     let s = Math.max(0, Math.floor((target - Date.now()) / 1000));
-    const days = Math.floor(s / 86400); s %= 86400;
-    const h = Math.floor(s / 3600); s %= 3600;
-    const m = Math.floor(s / 60); s %= 60;
-    const pad = (n) => String(n).padStart(2, "0");
-    document.getElementById("left").textContent = target <= Date.now() ? "🎉 Now!" : days + "d " + pad(h) + ":" + pad(m) + ":" + pad(s);
+    const parts = [["days", Math.floor(s / 86400)], ["hours", Math.floor(s / 3600) % 24], ["minutes", Math.floor(s / 60) % 60], ["seconds", s % 60]];
+    const left = document.getElementById("left");
+    left.hidden = s === 0;
+    document.getElementById("done").hidden = s > 0;
+    left.textContent = "";
+    for (const [unit, n] of parts) {
+      const box = document.createElement("div");
+      box.className = "card";
+      const num = document.createElement("div");
+      num.className = "big";
+      num.textContent = String(n).padStart(2, "0");
+      const small = document.createElement("small");
+      small.textContent = unit;
+      box.append(num, small);
+      left.append(box);
+    }
   }
 
   setInterval(render, 1000);

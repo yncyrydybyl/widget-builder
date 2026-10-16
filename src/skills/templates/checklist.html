@@ -4,25 +4,17 @@
 <meta charset="utf-8">
 <title>Shared checklist</title>
 <style>
-  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  form { display: flex; gap: 8px; margin-bottom: 10px; }
-  input[type=text] { flex: 1; min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
-  button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
-  ul { list-style: none; margin: 0; padding: 0; }
-  li { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
-  li.done span { text-decoration: line-through; color: var(--muted); }
-  li small { margin-left: auto; color: var(--muted); }
-  li button { background: transparent; color: var(--muted); min-height: 28px; padding: 0 6px; }
+  li.done .grow { text-decoration: line-through; color: var(--muted); }
 </style>
 </head>
 <body>
 <h1 id="heading">Shared checklist</h1>
-<form id="add">
+<form class="row" id="add">
   <input id="text" type="text" placeholder="New item" aria-label="New item" maxlength="200">
   <button type="submit">Add</button>
 </form>
-<ul id="list"></ul>
+<ul class="list card" id="list"></ul>
+<p class="empty" id="empty">Nothing on the list yet.</p>
 <script>
   // Settings: a new app of this kind changes only this line.
   const SETTINGS = {"title":"Shared checklist","placeholder":"New item","button":"Add"};
@@ -52,6 +44,8 @@
   function render() {
     const list = document.getElementById("list");
     list.textContent = "";
+    list.hidden = items.size === 0;
+    document.getElementById("empty").hidden = items.size > 0;
     for (const [id, item] of items) {
       const li = document.createElement("li");
       li.className = item.done ? "done" : "";
@@ -61,14 +55,14 @@
       box.setAttribute("aria-label", item.text);
       box.onchange = () => miniapp.send({ toggle: id, done: box.checked });
       const text = document.createElement("span");
+      text.className = "grow";
       text.textContent = item.text;
-      const by = document.createElement("small");
-      by.textContent = miniapp.displayName(item.by);
       const del = document.createElement("button");
+      del.className = "ghost";
       del.textContent = "✕";
       del.setAttribute("aria-label", "Remove " + item.text);
       del.onclick = () => miniapp.send({ remove: id });
-      li.append(box, text, by, del);
+      li.append(box, text, miniapp.avatar(item.by), del);
       list.append(li);
     }
   }

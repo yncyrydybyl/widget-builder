@@ -4,21 +4,16 @@
 <meta charset="utf-8">
 <title>Lunch poll</title>
 <style>
-  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  .option { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-  .option button { flex: 1; text-align: left; min-height: 36px; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 8px; padding: 6px 10px; cursor: pointer; position: relative; overflow: hidden; }
-  .option button.chosen { border-color: var(--accent); }
-  .bar { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: 0.18; }
-  .label { position: relative; }
-  .count { min-width: 2.5em; text-align: right; color: var(--muted); }
-  .who { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .option { display: block; width: 100%; margin: 0 0 8px; padding: 10px 12px; text-align: left; }
+  .option .row { justify-content: space-between; margin-bottom: 8px; }
+  .option.chosen { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 </style>
 </head>
 <body>
 <h1 id="question">Where do we have lunch?</h1>
 <div id="options"></div>
-<p class="who" id="who"></p>
+<div class="row" id="voters"></div>
+<p class="muted" id="who"></p>
 <script>
   // Settings: a new app of this kind changes only this line.
   const SETTINGS = {"title":"Lunch poll","question":"Where do we have lunch?","options":["Pizza","Sushi","Salad bar"]};
@@ -38,24 +33,26 @@
     box.textContent = "";
     for (const option of OPTIONS) {
       const n = Object.values(votes).filter((v) => v === option).length;
-      const row = document.createElement("div");
-      row.className = "option";
       const button = document.createElement("button");
-      button.className = option === mine ? "chosen" : "";
+      button.className = "option secondary" + (option === mine ? " chosen" : "");
       button.onclick = () => miniapp.send({ vote: option });
-      const bar = document.createElement("span");
-      bar.className = "bar";
-      bar.style.width = total ? (n / total) * 100 + "%" : "0";
+      const top = document.createElement("div");
+      top.className = "row";
       const label = document.createElement("span");
-      label.className = "label";
       label.textContent = option + (option === mine ? " ✓" : "");
-      button.append(bar, label);
       const count = document.createElement("span");
-      count.className = "count";
+      count.className = "badge";
       count.textContent = n;
-      row.append(button, count);
-      box.append(row);
+      top.append(label, count);
+      const meter = document.createElement("div");
+      meter.className = "meter";
+      const fill = document.createElement("span");
+      fill.style.width = total ? (n / total) * 100 + "%" : "0";
+      meter.append(fill);
+      button.append(top, meter);
+      box.append(button);
     }
+    document.getElementById("voters").replaceChildren(...Object.keys(votes).map(miniapp.avatar.bind(miniapp)));
     document.getElementById("who").textContent = total
       ? total + " voted: " + Object.keys(votes).map(miniapp.displayName).join(", ")
       : "No votes yet.";

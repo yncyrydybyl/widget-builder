@@ -8,7 +8,7 @@
  * shared and which errors happened; `judgeProbe` turns that into problems the
  * model can fix ("typing into 'New item' shares nothing").
  */
-import { withBridge } from "./apps";
+import { withBridge, type AppInfo } from "./apps";
 
 /** What one step did, as seen from outside the sandbox and from inside. */
 export interface ProbeStep {
@@ -151,9 +151,9 @@ export function judgeProbe(r: ProbeReport): string[] {
 
 /**
  * Loads the app into a hidden sandbox with a local room and runs the probe.
- * Sends come back as events from `userId` right away, as they would from a room.
+ * Sends come back as events from `info.user` right away, as they would from a room.
  */
-export function probeApp(html: string, userId: string, colors: Record<string, string>, theme: string, timeoutMs = 20_000): Promise<ProbeReport> {
+export function probeApp(html: string, info: AppInfo, timeoutMs = 20_000): Promise<ProbeReport> {
     const frame = document.createElement("iframe");
     frame.setAttribute("sandbox", "allow-scripts allow-forms");
     frame.setAttribute("aria-hidden", "true");
@@ -183,15 +183,14 @@ export function probeApp(html: string, userId: string, colors: Record<string, st
             const m = e.data as { kind: string; data?: unknown; message?: string; label?: string; step?: ProbeStep };
             if (m.kind === "sandbox-ready") post({ __miniappLoad: withBridge(html, PROBE) });
             else if (m.kind === "hello") {
-                const name = /^@([^:]+)/.exec(userId)?.[1] ?? userId;
-                post({ __miniapp: true, kind: "init", info: { user: { id: userId, name }, theme, colors } });
+                post({ __miniapp: true, kind: "init", info });
                 // Let the app render and fail at start, if it does, before using it.
                 setTimeout(() => {
                     started = true;
                     post({ __miniapp: true, kind: "probe" });
                 }, 400);
             } else if (m.kind === "send") {
-                post({ __miniapp: true, kind: "events", events: [{ id: `probe-${next++}`, sender: userId, ts: Date.now(), data: m.data }] });
+                post({ __miniapp: true, kind: "events", events: [{ id: `probe-${next++}`, sender: info.user.id, ts: Date.now(), data: m.data }] });
             } else if (m.kind === "error" && m.message) {
                 (current ?? (started ? [] : report.startErrors)).push(m.message);
             } else if (m.kind === "probe-step") current = [];

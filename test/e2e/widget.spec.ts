@@ -383,3 +383,64 @@ test("warns before replacing a version someone else published while editing", as
     expect((await sent(page)).filter((e) => e.type === APP)).toHaveLength(1);
     await expect(w.getByText(/while you were editing/)).toHaveCount(0);
 });
+
+test("an app gets its own accent colour, which survives settings changes and publishing", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("lunch", poll)] });
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await w.getByRole("button", { name: "Edit" }).click();
+    await w.getByRole("button", { name: "Colour #d6336c" }).click();
+    const app = w.frameLocator("iframe.app-frame");
+    // The bridge turns data-accent into --accent, with a readable text colour on it.
+    await expect(app.locator(".meter span").first()).toHaveCSS("background-color", "rgb(214, 51, 108)");
+
+    await w.getByRole("textbox", { name: "question" }).fill("Lunch where?");
+    await w.getByRole("button", { name: "Apply settings" }).click();
+    await expect(app.getByRole("heading", { name: "Lunch where?" })).toBeVisible();
+    await expect(app.locator(".meter span").first()).toHaveCSS("background-color", "rgb(214, 51, 108)");
+
+    await w.getByRole("button", { name: "Publish update" }).click();
+    await expect(w.getByText(/Published "Lunch poll" \(version 2\)/)).toBeVisible();
+    const html = String((await sent(page)).find((e) => e.type === APP)!.content.html);
+    expect(html).toContain('<html data-accent="#d6336c">');
+    // Back to the client's colour.
+    await w.getByRole("button", { name: "The room client's colour" }).click();
+    await expect(app.locator(".meter span").first()).toHaveCSS("background-color", "rgb(11, 122, 95)");
+});
+
+test("removing an app or editing over an unpublished draft asks first", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("lunch", poll)] });
+    await w.getByRole("button", { name: "Load model" }).click();
+    await w.getByRole("textbox", { name: "App description" }).fill("a shared shopping list");
+    await w.getByRole("button", { name: "Build app" }).click();
+    await expect(w.locator('main[data-busy="false"]')).toBeVisible({ timeout: 30_000 });
+
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await w.getByRole("button", { name: "Edit" }).click();
+    await expect(w.getByText(/Your draft in Build is not published/)).toBeVisible();
+    await w.getByRole("button", { name: "cancel" }).click();
+    await w.getByRole("button", { name: "remove" }).click();
+    await expect(w.getByText(/Remove "Lunch poll" for everyone/)).toBeVisible();
+    expect((await sent(page)).filter((e) => e.type === APP)).toHaveLength(0);
+    await w.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(w.getByText("No apps in this room yet.", { exact: false })).toBeVisible();
+    expect((await sent(page)).filter((e) => e.type === APP)).toEqual([{ type: APP, state_key: "lunch", content: {} }]);
+});
+
+test("an app's frame grows with its page", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME } });
+    await w.getByRole("button", { name: "Load model" }).click();
+    await w.getByRole("textbox", { name: "App description" }).fill("a shared shopping list");
+    await w.getByRole("button", { name: "Build app" }).click();
+    const frame = w.locator("iframe.app-frame");
+    const app = w.frameLocator("iframe.app-frame");
+    await expect(app.getByText("Nothing on the list yet.")).toBeVisible();
+    for (const item of ["Tent", "Stove", "Lamp", "Rope", "Map", "Water"]) {
+        await app.getByRole("textbox", { name: "New item" }).fill(item);
+        await app.getByRole("textbox", { name: "New item" }).press("Enter");
+    }
+    await expect(app.getByText("Water")).toBeVisible();
+    // The frame is as tall as the app's page (plus its border), with no scrolling inside.
+    const page_ = () => app.locator("html").evaluate((el) => el.scrollHeight);
+    await expect.poll(async () => Math.round((await frame.boundingBox())!.height - (await page_()))).toBe(2);
+    expect(await page_()).toBeGreaterThan(320);
+});

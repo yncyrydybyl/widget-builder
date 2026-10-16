@@ -6,6 +6,7 @@
  *
  * Pure: prompt building only.
  */
+import { withAccent } from "./apps";
 import type { ChatMessage } from "./chat";
 import api from "./skills/api.md?raw";
 import rules from "./skills/rules.md?raw";
@@ -184,7 +185,8 @@ export function applySettings(t: Template, settings: Settings): string {
 export function settingsOf(html: string): { template: Template; settings: Settings } | null {
     const m = SETTINGS_LINE.exec(html);
     if (!m) return null;
-    const blank = (h: string): string => h.replace(SETTINGS_LINE, "").replace(/<title>[^<]*<\/title>/i, "");
+    // The title, the settings and the accent colour may differ; nothing else.
+    const blank = (h: string): string => withAccent(h, null).replace(SETTINGS_LINE, "").replace(/<title>[^<]*<\/title>/i, "");
     const template = TEMPLATES.find((t) => t.fields && blank(t.html) === blank(html));
     if (!template) return null;
     try {

@@ -4,26 +4,19 @@
 <meta charset="utf-8">
 <title>Shared board</title>
 <style>
-  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  form { display: flex; gap: 8px; margin-bottom: 12px; }
-  input[type=text] { flex: 1; min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
-  button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
-  .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-  .column { border: 1px solid var(--line); border-radius: 10px; padding: 8px; min-height: 120px; }
-  .column h2 { font-size: 14px; margin: 0 0 8px; color: var(--muted); }
-  .card { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
-  .card small { display: block; color: var(--muted); margin: 2px 0 6px; }
-  .card button { min-height: 28px; padding: 0 8px; margin-right: 4px; background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  .column { min-height: 140px; }
+  .column h2 { display: flex; justify-content: space-between; color: var(--muted); }
+  .item { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
+  .item .row { margin-top: 6px; gap: 2px; }
 </style>
 </head>
 <body>
 <h1 id="heading">Shared board</h1>
-<form id="add">
+<form class="row" id="add">
   <input id="text" type="text" placeholder="New card" aria-label="New card" maxlength="200">
   <button type="submit">Add</button>
 </form>
-<div class="board" id="board"></div>
+<div class="grid" id="board"></div>
 <script>
   // Settings: a new app of this kind changes only this line.
   const SETTINGS = {"title":"Shared board","placeholder":"New card","columns":["To do","Doing","Done"]};
@@ -53,6 +46,7 @@
 
   function button(label, title, onclick) {
     const b = document.createElement("button");
+    b.className = "ghost";
     b.textContent = label;
     b.setAttribute("aria-label", title);
     b.onclick = onclick;
@@ -64,22 +58,29 @@
     board.textContent = "";
     COLUMNS.forEach((name, col) => {
       const column = document.createElement("section");
-      column.className = "column";
+      column.className = "column card";
+      const here = [...cards].filter(([, card]) => card.column === col);
       const title = document.createElement("h2");
-      title.textContent = name;
+      const count = document.createElement("span");
+      count.className = "badge";
+      count.textContent = here.length;
+      title.append(name, count);
       column.append(title);
-      for (const [id, card] of cards) {
-        if (card.column !== col) continue;
+      for (const [id, card] of here) {
         const el = document.createElement("div");
-        el.className = "card";
-        const text = document.createElement("span");
+        el.className = "item";
+        const text = document.createElement("div");
         text.textContent = card.text;
-        const by = document.createElement("small");
-        by.textContent = miniapp.displayName(card.by);
-        el.append(text, by);
-        if (col > 0) el.append(button("←", "Move " + card.text + " to " + COLUMNS[col - 1], () => miniapp.send({ move: id, column: col - 1 })));
-        if (col < COLUMNS.length - 1) el.append(button("→", "Move " + card.text + " to " + COLUMNS[col + 1], () => miniapp.send({ move: id, column: col + 1 })));
-        el.append(button("✕", "Remove " + card.text, () => miniapp.send({ remove: id })));
+        const row = document.createElement("div");
+        row.className = "row";
+        row.append(miniapp.avatar(card.by));
+        const gap = document.createElement("span");
+        gap.className = "grow";
+        row.append(gap);
+        if (col > 0) row.append(button("←", "Move " + card.text + " to " + COLUMNS[col - 1], () => miniapp.send({ move: id, column: col - 1 })));
+        if (col < COLUMNS.length - 1) row.append(button("→", "Move " + card.text + " to " + COLUMNS[col + 1], () => miniapp.send({ move: id, column: col + 1 })));
+        row.append(button("✕", "Remove " + card.text, () => miniapp.send({ remove: id })));
+        el.append(text, row);
         column.append(el);
       }
       board.append(column);

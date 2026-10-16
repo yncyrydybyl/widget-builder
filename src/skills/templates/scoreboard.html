@@ -4,24 +4,19 @@
 <meta charset="utf-8">
 <title>Scoreboard</title>
 <style>
-  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
-  h1 { font-size: 18px; margin: 0 0 12px; }
-  form { display: flex; gap: 8px; margin-bottom: 10px; }
-  input { flex: 1; min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
-  button { min-height: 36px; min-width: 36px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; font-size: 16px; }
-  table { width: 100%; border-collapse: collapse; }
-  td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
-  td.score { font-size: 20px; text-align: center; width: 3em; font-variant-numeric: tabular-nums; }
-  td.buttons { width: 6em; text-align: right; }
+  .rank { width: 1.6em; text-align: center; }
+  .score { min-width: 2em; text-align: center; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .list button { min-width: 38px; padding: 0; }
 </style>
 </head>
 <body>
 <h1 id="heading">Scoreboard</h1>
-<form id="add">
+<form class="row" id="add">
   <input id="name" placeholder="Player or team" aria-label="Player or team" maxlength="40">
   <button type="submit" aria-label="Add player">＋</button>
 </form>
-<table><tbody id="rows"></tbody></table>
+<ul class="list card" id="rows"></ul>
+<p class="empty" id="empty">No players yet.</p>
 <script>
   // Settings: a new app of this kind changes only this line.
   const SETTINGS = {"title":"Scoreboard","placeholder":"Player or team"};
@@ -48,26 +43,32 @@
   function render() {
     const rows = document.getElementById("rows");
     rows.textContent = "";
+    rows.hidden = scores.size === 0;
+    document.getElementById("empty").hidden = scores.size > 0;
     const sorted = [...scores].sort((a, b) => b[1] - a[1]);
-    for (const [name, points] of sorted) {
-      const tr = document.createElement("tr");
-      const who = document.createElement("td");
+    sorted.forEach(([name, points], i) => {
+      const li = document.createElement("li");
+      const rank = document.createElement("span");
+      rank.className = "rank";
+      rank.textContent = ["🥇", "🥈", "🥉"][i] || i + 1;
+      const who = document.createElement("span");
+      who.className = "grow";
       who.textContent = name;
-      const score = document.createElement("td");
+      const score = document.createElement("span");
       score.className = "score";
       score.textContent = points;
-      const buttons = document.createElement("td");
-      buttons.className = "buttons";
+      li.append(rank, who);
       for (const [label, delta] of [["−", -1], ["+", 1]]) {
         const b = document.createElement("button");
+        b.className = delta > 0 ? "" : "secondary";
         b.textContent = label;
         b.setAttribute("aria-label", (delta > 0 ? "Add a point for " : "Remove a point from ") + name);
         b.onclick = () => miniapp.send({ player: name, points: delta });
-        buttons.append(b, " ");
+        li.append(b);
+        if (delta < 0) li.append(score);
       }
-      tr.append(who, score, buttons);
-      rows.append(tr);
-    }
+      rows.append(li);
+    });
   }
 
   miniapp.ready(render);

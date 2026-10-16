@@ -6,7 +6,8 @@
 import type { IRoomEvent, WidgetApi } from "matrix-widget-api";
 import { APP_TYPE, BASE_VERSION, Bucket, accentOf, withAccent, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, roomWidgetContent, roomWidgetId, extractHtml, slug, titleOf, toApp, toAppEvent, type AppDoc, type AppEvent, type AppInfo } from "./apps";
 import { stripThinking, type ChatMessage } from "./chat";
-import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, deleteRemovedModels, isCached, loadModel, webGpuStatus, type ChatOptions, type Engine, type ModelInfo } from "./llm";
+import { COLIBRI, DEFAULT_COLIBRI_URL, baseUrl, loadColibri } from "./colibri";
+import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, deleteRemovedModels, isCached, loadModel, webGpuStatus, type ChatOptions, type Engine, type ModelInfo, type Progress } from "./llm";
 import { TEMPLATES, applySettings, buildMessages, checkSettings, buildSettingsMessages, defaultSettings, parseSettings, pickTemplate, settingsOf, type Settings, type Task, type Template } from "./skills";
 import { judgeProbe, probeApp, type ProbeReport } from "./probe";
 import { capabilitiesFor, connect, initialTheme, readParams, type Params } from "./widget-connect";
@@ -44,6 +45,9 @@ interface Prefs {
     modelId: string;
     /** Per model: the largest prompt part this GPU prefills in one pass (see llm-widget). */
     chunks: Record<string, number>;
+    /** The colibri server (modelId "colibri"), and its key if it has one. Never in room state. */
+    colibriUrl: string;
+    colibriKey: string;
 }
 
 const SETTINGS_KEY = "widget-builder.settings";
@@ -69,10 +73,10 @@ const isGpuLoss = (msg: string): boolean => /device (was )?lost|GPUBuffer|mapAsy
 const STALL_MS = 90_000;
 
 function loadPrefs(): Prefs {
-    const defaults: Prefs = { modelId: DEFAULT_MODEL, chunks: {} };
+    const defaults: Prefs = { modelId: DEFAULT_MODEL, chunks: {}, colibriUrl: DEFAULT_COLIBRI_URL, colibriKey: "" };
     try {
         const s = { ...defaults, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as Partial<Prefs>) };
-        if (!MODELS.some((m) => m.id === s.modelId)) s.modelId = DEFAULT_MODEL;
+        if (s.modelId !== COLIBRI && !MODELS.some((m) => m.id === s.modelId)) s.modelId = DEFAULT_MODEL;
         return s;
     } catch {
         return defaults;
@@ -156,6 +160,18 @@ export class Controller {
         return this.models.find((m) => m.id === this.settings.modelId);
     }
 
+    /** colibri is chosen: a server on this machine, no WebGPU needed. */
+    get useColibri(): boolean {
+        return !this.useEcho && this.settings.modelId === COLIBRI;
+    }
+
+    /** Where the loaded model runs, for the line under the model picker. */
+    get engineWhere(): string {
+        return this.engine && !this.engine.gpu && !this.useEcho
+            ? `Runs on colibri at ${baseUrl(this.settings.colibriUrl)}, on this machine; your requests go only there.`
+            : "Runs locally; your requests never leave this browser.";
+    }
+
     /** A draft that is not in the room yet, or differs from its published version. */
     get unsaved(): boolean {
         if (!this.draft) return false;
@@ -184,7 +200,7 @@ export class Controller {
         void webGpuStatus().then((g) => {
             this.gpuProblem = this.useEcho ? null : g.problem;
             this.f16 = g.f16 && this.params.get("f16") !== "0";
-            if (!this.models.some((m) => m.id === this.settings.modelId)) this.settings.modelId = this.models[0].id;
+            if (this.settings.modelId !== COLIBRI && !this.models.some((m) => m.id === this.settings.modelId)) this.settings.modelId = this.models[0].id;
             void this.refreshCache();
         });
         const capabilities = capabilitiesFor(this.runnerOnly);
@@ -344,7 +360,8 @@ export class Controller {
         try {
             const messages = buildMessages(task, this.userId);
             this.lastPromptChars = messages.reduce((n, m) => n + m.content.length, 0);
-            const raw = await this.chatGuarded(engine, messages, (soFar) => update({ text: "Writing the app…", lines: soFar.split("\n").length }), {
+            // Empty: colibri's keepalives while it reads a long prompt.
+            const raw = await this.chatGuarded(engine, messages, (soFar) => soFar && update({ text: "Writing the app…", lines: soFar.split("\n").length }), {
                 onRound: (i, of) => update({ text: `Reading the instructions (part ${i} of ${of})…` }),
                 maxTokens: 3000,
                 temperature,
@@ -387,7 +404,13 @@ export class Controller {
             const stall = /stalled/.test(msg);
             // Stop pressed: no recovery. The watchdog aborts too, but on purpose.
             const stopped = !!this.abort?.signal.aborted && !stall;
-            if (isGpuLoss(msg) && gpuRetries < MAX_GPU_RETRIES && !stopped) {
+            // A server engine has no device to lose: its errors, a stall included, are only reported.
+            const gpuLoss = engine.gpu && isGpuLoss(msg) && !stopped;
+            if (!engine.gpu && stall) {
+                update({ text: `${engine.modelId} sent nothing for ${STALL_MS / 1000} s, not even a keepalive; stopped. Check the terminal running colibri.`, lines: undefined, error: true });
+                return;
+            }
+            if (gpuLoss && gpuRetries < MAX_GPU_RETRIES) {
                 update({
                     text: stall
                         ? "The model stopped responding; reloading it and retrying in smaller parts…"
@@ -402,7 +425,7 @@ export class Controller {
                 // Stays busy through the retry: run() takes over the flag.
                 return await this.run(task, gpuRetries + 1, attempt, temperature);
             }
-            if (isGpuLoss(msg) && !stopped) {
+            if (gpuLoss) {
                 // Out of retries: the engine is gone. Say so instead of failing every later request.
                 const tooBig = `${engine.modelId} keeps resetting this GPU, even in small parts. Choose a smaller model.`;
                 update({ text: tooBig, lines: undefined, error: true });
@@ -742,15 +765,18 @@ export class Controller {
         try {
             await this.engine?.unload();
             this.engine = null;
+            const onProgress = (p: Progress): void => {
+                this.progress = p.fraction;
+                this.progressText = p.text;
+            };
             this.engine = this.useEcho
                 ? new EchoEngine()
-                : await loadModel(
+                : this.useColibri
+                  ? await loadColibri({ url: this.settings.colibriUrl, key: this.settings.colibriKey }, onProgress)
+                  : await loadModel(
                       this.selected ?? this.models[0],
                       this.f16,
-                      (p) => {
-                          this.progress = p.fraction;
-                          this.progressText = p.text;
-                      },
+                      onProgress,
                       Number(this.params.get("ctx")) || undefined,
                   );
             this.engineStatus = "ready";

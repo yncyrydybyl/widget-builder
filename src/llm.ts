@@ -1,7 +1,8 @@
 /*
  * The model behind one small interface. `WebLlmEngine` runs a WebLLM model on the
- * local GPU in a worker; `EchoEngine` (fragment `engine=echo`) needs no GPU and
- * exists for the mock-host tests and for trying the room plumbing quickly.
+ * local GPU in a worker; `ColibriEngine` (colibri.ts) asks a colibri server on this
+ * machine; `EchoEngine` (fragment `engine=echo`) needs no GPU and exists for the
+ * mock-host tests and for trying the room plumbing quickly.
  */
 import { isAck, prefillRounds, type ChatMessage } from "./chat";
 
@@ -67,6 +68,8 @@ export interface ChatOptions {
 
 export interface Engine {
     readonly modelId: string;
+    /** Runs on this browser's GPU: a lost device is recovered by reloading in smaller prompt parts. */
+    readonly gpu: boolean;
     chat(messages: ChatMessage[], onText: (soFar: string) => void, opts?: ChatOptions): Promise<string>;
     unload(): Promise<void>;
 }
@@ -167,6 +170,8 @@ export function loadModel(m: ModelInfo, f16: boolean, onProgress: (p: Progress) 
 }
 
 class WebLlmEngine implements Engine {
+    readonly gpu = true;
+
     constructor(
         readonly modelId: string,
         private engine: import("@mlc-ai/web-llm").WebWorkerMLCEngine,
@@ -254,6 +259,7 @@ async function loadWebLlm(modelId: string, onProgress: (p: Progress) => void, co
 /** Answers with the template from the prompt, renamed. Deterministic, instant, no GPU. */
 export class EchoEngine implements Engine {
     readonly modelId = "echo";
+    readonly gpu = false;
 
     async chat(messages: ChatMessage[], onText: (soFar: string) => void): Promise<string> {
         const all = messages.map((m) => m.content).join("\n");

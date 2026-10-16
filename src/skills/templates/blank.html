@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>App</title>
+<style>
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+  #log { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>App</h1>
+<button id="hello">Say hello</button>
+<p id="log"></p>
+<script>
+  const greeted = [];
+
+  miniapp.on((ev) => {
+    if (ev.data && ev.data.hello) greeted.push(miniapp.displayName(ev.sender));
+    render();
+  });
+
+  document.getElementById("hello").onclick = () => miniapp.send({ hello: true });
+
+  function render() {
+    document.getElementById("log").textContent = greeted.length ? "Hello from " + greeted.join(", ") : "Nobody said hello yet.";
+  }
+
+  miniapp.ready(render);
+</script>
+</body>
+</html>

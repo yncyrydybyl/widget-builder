@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Random picker</title>
+<style>
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; text-align: center; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 90px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 8px; font: inherit; }
+  button { margin-top: 10px; min-height: 40px; padding: 0 20px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); font-size: 16px; cursor: pointer; }
+  #result { font-size: 28px; margin: 18px 0 4px; min-height: 1.3em; }
+  #by { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>Who's next?</h1>
+<textarea id="choices" aria-label="Choices, one per line">Anna
+Bob
+Carla</textarea>
+<button id="pick">Pick one</button>
+<p id="result"></p>
+<p id="by"></p>
+<script>
+  // The draw happens on the clicker's device and is shared, so everyone sees the same result.
+  miniapp.on((ev) => {
+    const d = ev.data || {};
+    if (typeof d.picked === "string") {
+      document.getElementById("result").textContent = "🎲 " + d.picked;
+      document.getElementById("by").textContent = "picked by " + miniapp.displayName(ev.sender) + " from " + d.from + " choices";
+    }
+  });
+
+  document.getElementById("pick").onclick = () => {
+    const choices = document.getElementById("choices").value.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (!choices.length) return;
+    const picked = choices[Math.floor(Math.random() * choices.length)];
+    miniapp.send({ picked, from: choices.length });
+  };
+</script>
+</body>
+</html>

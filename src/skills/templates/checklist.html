@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Shared checklist</title>
+<style>
+  body { background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; margin: 0; padding: 12px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  form { display: flex; gap: 8px; margin-bottom: 10px; }
+  input[type=text] { flex: 1; min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+  button { min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); cursor: pointer; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
+  li.done span { text-decoration: line-through; color: var(--muted); }
+  li small { margin-left: auto; color: var(--muted); }
+  li button { background: transparent; color: var(--muted); min-height: 28px; padding: 0 6px; }
+</style>
+</head>
+<body>
+<h1>Shared checklist</h1>
+<form id="add">
+  <input id="text" type="text" placeholder="New item" aria-label="New item" maxlength="200">
+  <button type="submit">Add</button>
+</form>
+<ul id="list"></ul>
+<script>
+  const items = new Map(); // event id -> { text, done, by }
+
+  miniapp.on((ev) => {
+    const d = ev.data || {};
+    if (typeof d.add === "string") items.set(ev.id, { text: d.add, done: false, by: ev.sender });
+    if (d.toggle && items.has(d.toggle)) items.get(d.toggle).done = !!d.done;
+    if (d.remove) items.delete(d.remove);
+    render();
+  });
+
+  document.getElementById("add").onsubmit = (e) => {
+    e.preventDefault();
+    const input = document.getElementById("text");
+    const text = input.value.trim();
+    if (text) miniapp.send({ add: text });
+    input.value = "";
+  };
+
+  function render() {
+    const list = document.getElementById("list");
+    list.textContent = "";
+    for (const [id, item] of items) {
+      const li = document.createElement("li");
+      li.className = item.done ? "done" : "";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = item.done;
+      box.setAttribute("aria-label", item.text);
+      box.onchange = () => miniapp.send({ toggle: id, done: box.checked });
+      const text = document.createElement("span");
+      text.textContent = item.text;
+      const by = document.createElement("small");
+      by.textContent = miniapp.displayName(item.by);
+      const del = document.createElement("button");
+      del.textContent = "✕";
+      del.setAttribute("aria-label", "Remove " + item.text);
+      del.onclick = () => miniapp.send({ remove: id });
+      li.append(box, text, by, del);
+      list.append(li);
+    }
+  }
+
+  miniapp.ready(render);
+</script>
+</body>
+</html>

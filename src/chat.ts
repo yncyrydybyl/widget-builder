@@ -33,6 +33,11 @@ export function splitText(text: string, max: number): string[] {
 
 export const ACK = "OK";
 
+/** A bare acknowledgement ("OK", "Ok.") instead of an answer. */
+export function isAck(text: string): boolean {
+    return /^\W*ok\W*$/i.test(text.trim());
+}
+
 /**
  * Turns one long prompt into rounds, so that no single prefill pass exceeds
  * `chunkChars`. Every round but the last carries one part and asks for a bare

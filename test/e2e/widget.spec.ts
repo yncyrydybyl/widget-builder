@@ -190,3 +190,27 @@ test("the drawing template shares strokes", async ({ page }) => {
     expect(inked).toBeGreaterThan(200);
     await expect(w.getByText("Fix:")).toHaveCount(0);
 });
+
+test("apps that add items through a form work, and a form cannot navigate away", async ({ page }) => {
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME } });
+    await w.getByRole("button", { name: "Load model" }).click();
+    await w.getByRole("textbox", { name: "App description" }).fill("a shared shopping list");
+    await w.getByRole("button", { name: "Build app" }).click();
+    const app = w.frameLocator("iframe.app-frame");
+    await app.getByRole("textbox", { name: "New item" }).fill("Milk");
+    await app.getByRole("textbox", { name: "New item" }).press("Enter");
+    await expect(app.getByText("Milk")).toBeVisible();
+    await app.getByRole("textbox", { name: "New item" }).fill("Bread");
+    await app.getByRole("button", { name: "Add" }).click();
+    await expect(app.getByText("Bread")).toBeVisible();
+
+    const leaky = `<!doctype html><html><head><title>x</title></head><body><p id="out">here</p>
+      <form id="f" action="http://localhost:4184/index.html" method="get"><button>go</button></form>
+      <script>document.getElementById("f").submit();</script></body></html>`;
+    const w2 = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("leaky", leaky, "Leaky")] });
+    await w2.getByRole("button", { name: "Apps (1)" }).click();
+    await w2.getByRole("button", { name: "Open" }).click();
+    await page.waitForTimeout(500);
+    // Still the app's own document: the submit was blocked by form-action 'none'.
+    await expect(w2.frameLocator("iframe.app-frame").getByText("here")).toBeVisible();
+});

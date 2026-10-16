@@ -1,8 +1,11 @@
 <script lang="ts">
     /*
-     * Runs one app: an iframe on sandbox.html (sandbox="allow-scripts", so an
-     * opaque origin with no network), which receives the app's HTML with the
-     * bridge in front. Relays the app's actions to the controller and the
+     * Runs one app: an iframe on sandbox.html (sandbox="allow-scripts allow-forms",
+     * so an opaque origin with no network), which receives the app's HTML with the
+     * bridge in front. allow-forms only lets the submit event fire: without it the
+     * browser drops a submit before any handler sees it, and apps that add items
+     * through a <form> do nothing. sandbox.html's CSP (form-action 'none') still
+     * blocks a form from navigating anywhere. Relays the app's actions to the controller and the
      * room's actions back in. Remount (with {#key}) to load different HTML.
      */
     import { onDestroy } from "svelte";
@@ -59,4 +62,4 @@
     onDestroy(() => window.removeEventListener("message", onMessage));
 </script>
 
-<iframe bind:this={frame} class="app-frame" {src} sandbox="allow-scripts" {title}></iframe>
+<iframe bind:this={frame} class="app-frame" {src} sandbox="allow-scripts allow-forms" {title}></iframe>

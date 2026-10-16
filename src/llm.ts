@@ -3,7 +3,7 @@
  * local GPU in a worker; `EchoEngine` (fragment `engine=echo`) needs no GPU and
  * exists for the mock-host tests and for trying the room plumbing quickly.
  */
-import { prefillRounds, type ChatMessage } from "./chat";
+import { isAck, prefillRounds, type ChatMessage } from "./chat";
 
 export interface ModelInfo {
     /** WebLLM model id without the quantisation suffix. */
@@ -150,20 +150,31 @@ class WebLlmEngine implements Engine {
                 history.push({ role: "assistant", content: r.choices[0]?.message.content ?? "" });
             }
             if (rounds.length > 1) opts.onRound?.(rounds.length, rounds.length);
+            const answer = async (): Promise<string> => {
+                const stream = await this.engine.chat.completions.create({
+                    messages: history,
+                    stream: true,
+                    stream_options: { include_usage: true },
+                    temperature: opts.temperature ?? 0.6,
+                    max_tokens: opts.maxTokens ?? 768,
+                    extra_body,
+                });
+                let text = "";
+                for await (const chunk of stream) {
+                    text += chunk.choices[0]?.delta?.content ?? "";
+                    if (chunk.usage) count(chunk.usage);
+                    else onText(text);
+                }
+                return text;
+            };
             history.push({ role: "user", content: rounds[rounds.length - 1] ?? "" });
-            const stream = await this.engine.chat.completions.create({
-                messages: history,
-                stream: true,
-                stream_options: { include_usage: true },
-                temperature: opts.temperature ?? 0.6,
-                max_tokens: opts.maxTokens ?? 768,
-                extra_body,
-            });
-            let text = "";
-            for await (const chunk of stream) {
-                text += chunk.choices[0]?.delta?.content ?? "";
-                if (chunk.usage) count(chunk.usage);
-                else onText(text);
+            let text = await answer();
+            // After many "reply only with OK" rounds a small model may say OK once
+            // more instead of answering. Ask once more, plainly.
+            if (rounds.length > 1 && isAck(text) && !opts.signal?.aborted) {
+                history.push({ role: "assistant", content: text });
+                history.push({ role: "user", content: "Do not reply OK. The material is complete. Write your full answer to the request now." });
+                text = await answer();
             }
             opts.onUsage?.(usage);
             return text;

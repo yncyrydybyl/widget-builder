@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { APP_TYPE, BRIDGE, Bucket, EVENT_TYPE, checkHtml, extractHtml, slug, titleOf, toApp, toAppEvent, withBridge } from "./apps";
 import { TEMPLATES, buildMessages, pickTemplate } from "./skills";
-import { prefillRounds } from "./chat";
+import { isAck, prefillRounds } from "./chat";
 
 const state = (key: string, content: Record<string, unknown>) =>
     ({ type: APP_TYPE, state_key: key, sender: "@anna:x", origin_server_ts: 5, content, event_id: "$s", room_id: "!r", unsigned: {} }) as never;
@@ -96,5 +96,12 @@ describe("skills", () => {
         // On GPUs that need it, the material is read in parts and the request comes whole at the end.
         const r = prefillRounds(m, 1500);
         expect(r.rounds.at(-1)).toContain("Build this app: lunch poll");
+    });
+});
+
+describe("acknowledgements", () => {
+    it("tells a bare OK from an answer", () => {
+        for (const t of ["OK", "ok.", " Ok! ", "**OK**"]) expect(isAck(t), t).toBe(true);
+        for (const t of ["OK, here is the app: ```html", "Okay", "Done."]) expect(isAck(t), t).toBe(false);
     });
 });

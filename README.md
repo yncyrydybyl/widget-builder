@@ -89,6 +89,12 @@ pnpm test:e2e                               # Playwright, mock host, echo engine
 HEADED=1 node test/real/build.mjs [model]   # real model on your GPU (after pnpm build)
 ```
 
+## Icon
+
+`public/icon.svg` (favicon, header) and `public/icon-512.png` (store listing): three finished
+app tiles and one being made. Regenerate the PNG with
+`magick -background none -density 192 public/icon.svg -resize 512x512 public/icon-512.png`.
+
 ## License
 
 AGPL-3.0-or-later, see `LICENSE.md`.

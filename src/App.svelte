@@ -66,6 +66,7 @@
 {:else}
     <main data-busy={c.busy}>
         <header>
+            <img class="logo" src="./icon.svg" alt="" width="28" height="28" />
             <h1>Widget Builder</h1>
             <span class="pill {c.room}">
                 {#if c.room === "standalone"}standalone{:else if c.room === "connecting"}connecting…{:else if c.room === "ready"}in room{:else}no permission{/if}

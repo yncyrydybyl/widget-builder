@@ -1,6 +1,6 @@
 {
   "name": "widget-builder",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A Matrix widget with an in-browser LLM that builds small apps for the room, runs them sandboxed and shares them",
   "private": true,
   "type": "module",

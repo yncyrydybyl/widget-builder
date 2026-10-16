@@ -125,3 +125,7 @@ button.danger:not(.link) { background: var(--warn); border-color: var(--warn); c
 
 main.runner { max-width: none; padding: 0; height: 100vh; }
 main.runner .app-frame { height: 100vh; border: 0; border-radius: 0; }
+/* Corner pointer to the builder: small and faded so it does not cover the app's own controls. */
+.edit-hint { position: fixed; right: 6px; bottom: 6px; max-width: min(280px, calc(100vw - 12px)); background: var(--bg); font-size: 12px; padding: 2px 8px; opacity: 0.7; }
+.edit-hint:hover, .edit-hint:focus-within, .edit-hint[open] { opacity: 1; }
+.edit-hint[open] { padding: 6px 10px; box-shadow: 0 2px 8px rgb(0 0 0 / 0.15); }

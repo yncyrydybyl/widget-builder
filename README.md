@@ -74,6 +74,12 @@ goes back to those. **undo** works for every kind of change. **Publish update** 
 version to the same state event; when someone else published a newer version since you started
 editing, it says so and asks before replacing theirs.
 
+An app's own room widget cannot edit it: that would need `send.state_event` in a widget everyone in
+the room opens. Its **Edit** corner says where to do it instead (Widget Builder → Apps → Edit). It
+does not open the builder: neither Element nor the Marcade Player lets a widget open another
+widget (MSC2931 `navigate` only switches rooms), and finding the builder widget would need
+`receive.state_event:im.vector.modular.widgets`.
+
 The app's own room widget has no edit button: it would need permission to write room state for
 everyone who opens the app.
 

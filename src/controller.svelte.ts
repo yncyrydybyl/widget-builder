@@ -8,6 +8,7 @@ import { APP_TYPE, Bucket, EVENT_TYPE, WIDGET_TYPE, appOfRoomWidget, checkHtml, 
 import { stripThinking } from "./chat";
 import { DEFAULT_MODEL, EchoEngine, MODELS, availableModels, isCached, loadModel, webGpuStatus, type Engine, type ModelInfo } from "./llm";
 import { TEMPLATES, buildMessages, pickTemplate, type Task } from "./skills";
+import { judgeProbe, probeApp, type ProbeReport } from "./probe";
 import { capabilitiesFor, connect, initialTheme, readParams, type Params } from "./widget-connect";
 
 export type RoomStatus = "standalone" | "connecting" | "ready" | "no-permission";
@@ -46,8 +47,17 @@ const MIN_CHUNK = 300;
  */
 const FIRST_CHUNK = 2400;
 const MAX_GPU_RETRIES = 3;
-// "Model not loaded": the engine died with an earlier device loss.
-const isGpuLoss = (msg: string): boolean => /device (was )?lost|GPUBuffer|mapAsync|DEVICE_LOST|ModelNotLoaded|not loaded/i.test(msg);
+/** Model calls per request: the answer, a fix with the probe's findings, a fresh start. */
+const MAX_ATTEMPTS = 3;
+// "Model not loaded": the engine died with an earlier device loss. "Stalled": our
+// watchdog gave up on a GPU that stopped answering without reporting anything.
+const isGpuLoss = (msg: string): boolean => /device (was )?lost|GPUBuffer|mapAsync|DEVICE_LOST|ModelNotLoaded|not loaded|stalled/i.test(msg);
+/*
+ * A prompt part or an answer that makes no progress for this long counts as a
+ * hung GPU. Seen on a Radeon 860M: a prefill round that never returned, with no
+ * device-lost event. Generous: a round normally answers within seconds.
+ */
+const STALL_MS = 90_000;
 
 function loadSettings(): Settings {
     const defaults: Settings = { modelId: DEFAULT_MODEL, chunks: {} };
@@ -107,8 +117,10 @@ export class Controller {
     private nextLocal = 1;
     private buckets = new Map<string, Bucket>();
     private lastPromptChars = 0;
-    /** The draft already sent back automatically for a runtime error. */
-    private autoFixed: string | null = null;
+    /** The best version so far of the app being built, by number of problems found. */
+    private best: { html: string; problems: string[] } | null = null;
+    /** `#/?probe=0` turns the click-through test off (for tests of the plain flow). */
+    readonly useProbe = this.params.get("probe") !== "0";
 
     get model(): string {
         return this.engine?.modelId ?? "";
@@ -221,13 +233,8 @@ export class Controller {
 
     reportAppError(appId: string | null, message: string): void {
         if (appId === null) {
+            // Fixing it is the probe's job while building; afterwards the "fix it" button.
             this.draftError = message;
-            // A fresh draft that fails at once goes back to the model by itself, once.
-            if (this.draft && !this.busy && this.autoFixed !== this.draft.html && this.engineStatus === "ready") {
-                this.autoFixed = this.draft.html;
-                this.say("note", "The app failed when it started; asking the model to fix it…");
-                void this.fix();
-            }
         } else this.notice = `${this.apps.find((a) => a.id === appId)?.name ?? appId}: ${message}`;
     }
 
@@ -259,13 +266,19 @@ export class Controller {
         await this.run({ kind: "fix", error: this.draftError, current: this.draft.html });
     }
 
-    private async run(task: Task, gpuRetries = 0, repaired = false): Promise<void> {
+    /**
+     * One model call. A new app is then tried out (checkHtml, then the click-through
+     * probe); with problems it goes back to the model with them, up to
+     * MAX_ATTEMPTS calls in all, and the version with the fewest problems stays.
+     */
+    private async run(task: Task, gpuRetries = 0, attempt = 1, temperature = 0.2): Promise<void> {
         if (!this.engine) {
             this.busy = false;
             this.say("note", "Load a model first.", { error: true });
             return;
         }
-        const depth = gpuRetries + (repaired ? 1 : 0);
+        const depth = gpuRetries + attempt - 1;
+        if (attempt === 1 && gpuRetries === 0) this.best = null;
         this.busy = true;
         const engine = this.engine;
         const entry = this.say("model", "", { lines: 0 });
@@ -277,17 +290,46 @@ export class Controller {
         try {
             const messages = buildMessages(task, this.userId);
             this.lastPromptChars = messages.reduce((n, m) => n + m.content.length, 0);
-            const raw = await engine.chat(messages, (soFar) => update({ text: "Writing the app…", lines: soFar.split("\n").length }), {
-                signal: this.abort.signal,
-                chunkChars: this.settings.chunks[engine.modelId] ?? FIRST_CHUNK,
-                onRound: (i, of) => update({ text: `Reading the instructions (part ${i} of ${of})…` }),
-                maxTokens: 3000,
-                temperature: 0.2,
-            });
+            // Watchdog: a hung GPU never answers and never reports an error.
+            let lastProgress = Date.now();
+            let stalled = false;
+            const watchdog = setInterval(() => {
+                if (Date.now() - lastProgress < STALL_MS) return;
+                stalled = true;
+                this.abort?.abort();
+            }, 5000);
+            let raw: string;
+            try {
+                raw = await Promise.race([
+                    engine.chat(
+                        messages,
+                        (soFar) => {
+                            lastProgress = Date.now();
+                            update({ text: "Writing the app…", lines: soFar.split("\n").length });
+                        },
+                        {
+                            signal: this.abort.signal,
+                            chunkChars: this.settings.chunks[engine.modelId] ?? FIRST_CHUNK,
+                            onRound: (i, of) => {
+                                lastProgress = Date.now();
+                                update({ text: `Reading the instructions (part ${i} of ${of})…` });
+                            },
+                            maxTokens: 3000,
+                            temperature,
+                        },
+                    ),
+                    // The engine may not even return after the abort; do not wait for it.
+                    new Promise<never>((_, reject) => this.abort!.signal.addEventListener("abort", () => stalled && reject(new Error("The model stalled")))),
+                ]);
+            } finally {
+                clearInterval(watchdog);
+            }
+            if (stalled) throw new Error("The model stalled");
             const answer = stripThinking(raw);
             const html = extractHtml(answer);
             if (!html) {
                 update({ text: answer || "The model returned nothing.", lines: undefined, error: true });
+                if (attempt < MAX_ATTEMPTS) await this.run(task, 0, attempt + 1, 0.7);
                 return;
             }
             const problems = checkHtml(html);
@@ -297,24 +339,57 @@ export class Controller {
             const summary = after.slice(0, 300) || (fences === 1 ? "The answer stopped before the end of the file." : "Done.");
             update({ text: summary, lines: html.split("\n").length, problems });
             this.setDraft(html);
-            // One automatic repair round for problems we can detect without running it.
-            if (problems.length && !repaired) {
-                this.say("note", "Asking the model to fix these problems…");
-                await this.run({ kind: "fix", error: problems.join("\n"), current: html }, 0, true);
+            if (this.useProbe) {
+                const testing = this.say("note", "Trying the app out: typing, clicking…");
+                const found = judgeProbe(await this.probe(html));
+                problems.push(...found);
+                const i = this.chat.findIndex((e) => e.id === testing.id);
+                if (i !== -1)
+                    this.chat[i] = {
+                        ...this.chat[i],
+                        text: found.length ? `Tried the app out: ${found.length === 1 ? "1 problem" : `${found.length} problems`}.` : "Tried the app out: it works.",
+                        problems: found,
+                    };
+            }
+            if (!this.best || problems.length < this.best.problems.length) this.best = { html, problems };
+            if (!problems.length) return;
+            if (attempt < MAX_ATTEMPTS) {
+                // Second try: fix with the exact findings. Third: start over with more
+                // variety, which gets out of a fix that goes in circles.
+                const fresh = attempt === MAX_ATTEMPTS - 1 && task.kind === "create";
+                this.say("note", fresh ? "Starting over, with the problems in mind…" : "Asking the model to fix these problems…");
+                const next: Task = fresh
+                    ? { ...task, request: `${task.request}\nAvoid these problems an earlier version had:\n- ${problems.join("\n- ")}` }
+                    : { kind: "fix", error: problems.join("\n"), current: (this.best ?? { html }).html };
+                await this.run(next, 0, attempt + 1, fresh ? 0.7 : 0.2);
+                return;
+            }
+            // Out of attempts: keep the best version, say what is still wrong.
+            if (this.best && this.best.html !== html) {
+                this.setDraft(this.best.html);
+                this.say("note", `Kept the version with the fewest problems (${this.best.problems.length}). Describe a fix, or press "fix it".`);
             }
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            if (isGpuLoss(msg) && gpuRetries < MAX_GPU_RETRIES && !this.abort?.signal.aborted) {
-                update({ text: "The GPU reset; reloading the model and retrying in smaller parts…", lines: undefined });
+            const stall = /stalled/.test(msg);
+            // Stop pressed: no recovery. The watchdog aborts too, but on purpose.
+            const stopped = !!this.abort?.signal.aborted && !stall;
+            if (isGpuLoss(msg) && gpuRetries < MAX_GPU_RETRIES && !stopped) {
+                update({
+                    text: stall
+                        ? "The model stopped responding; reloading it and retrying in smaller parts…"
+                        : "The GPU reset; reloading the model and retrying in smaller parts…",
+                    lines: undefined,
+                });
                 await this.recoverFromGpuLoss(engine);
                 if (!this.engine) {
                     update({ text: "The model could not be reloaded after a GPU reset.", error: true });
                     return;
                 }
                 // Stays busy through the retry: run() takes over the flag.
-                return await this.run(task, gpuRetries + 1, repaired);
+                return await this.run(task, gpuRetries + 1, attempt, temperature);
             }
-            if (isGpuLoss(msg) && !this.abort?.signal.aborted) {
+            if (isGpuLoss(msg) && !stopped) {
                 // Out of retries: the engine is gone. Say so instead of failing every later request.
                 const tooBig = `${engine.modelId} keeps resetting this GPU, even in small parts. Choose a smaller model.`;
                 update({ text: tooBig, lines: undefined, error: true });
@@ -331,6 +406,14 @@ export class Controller {
                 this.abort = null;
             }
         }
+    }
+
+    /** Uses the app once in a hidden sandbox (see probe.ts). */
+    private probe(html: string): Promise<ProbeReport> {
+        const css = getComputedStyle(document.documentElement);
+        const colors: Record<string, string> = {};
+        for (const k of ["--bg", "--fg", "--muted", "--accent", "--accent-fg", "--card", "--line"]) colors[k] = css.getPropertyValue(k).trim();
+        return probeApp(html, this.userId, colors, this.theme);
     }
 
     private setDraft(html: string): void {

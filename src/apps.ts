@@ -198,9 +198,9 @@ export const BRIDGE = `(() => {
   post({ kind: "hello" });
 })();`;
 
-/** The app document with the bridge as its first script. */
-export function withBridge(html: string): string {
-    const tag = `<script>${BRIDGE}</script>`;
+/** The app document with the bridge (and any extra script, such as the probe) first. */
+export function withBridge(html: string, extra = ""): string {
+    const tag = `<script>${BRIDGE}</script>${extra ? `<script>${extra}</script>` : ""}`;
     if (/<head[^>]*>/i.test(html)) return html.replace(/<head[^>]*>/i, (m) => `${m}${tag}`);
     if (/<html[^>]*>/i.test(html)) return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${tag}</head>`);
     return `<!doctype html><html><head><meta charset="utf-8">${tag}</head><body>${html}</body></html>`;

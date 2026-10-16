@@ -214,3 +214,50 @@ test("apps that add items through a form work, and a form cannot navigate away",
     // Still the app's own document: the submit was blocked by form-action 'none'.
     await expect(w2.frameLocator("iframe.app-frame").getByText("here")).toBeVisible();
 });
+
+test("every template passes the click-through test", async ({ page }) => {
+    test.setTimeout(90_000);
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME } });
+    await w.getByRole("button", { name: "Load model" }).click();
+    const requests = [
+        "a poll about lunch",
+        "a shared shopping list",
+        "a kanban board",
+        "pick a random person for cake",
+        "a scoreboard for our game",
+        "a countdown to the release",
+        "a sketch pad",
+        "a guestbook",
+    ];
+    for (const request of requests) {
+        if (await w.getByRole("button", { name: "new app" }).count()) await w.getByRole("button", { name: "new app" }).click();
+        await w.getByRole("textbox", { name: "App description" }).fill(request);
+        await w.getByRole("button", { name: "Build app" }).click();
+        await expect(w.locator('main[data-busy="false"]'), request).toBeVisible({ timeout: 30_000 });
+        await expect(w.getByText(/^Tried the app out/), request).toHaveText("Tried the app out: it works.");
+    }
+});
+
+test("an app that does not share what is typed goes back to the model with that finding", async ({ page }) => {
+    const local = `<!doctype html><html><head><title>Notes</title></head><body>
+      <form id="f"><input id="t" type="text" aria-label="Note"><button>Add</button></form><ul id="l"></ul>
+      <script>
+        const notes = [];
+        document.getElementById("f").onsubmit = (e) => {
+          e.preventDefault();
+          notes.push(document.getElementById("t").value);   // never shared with the room
+          document.getElementById("t").value = "";
+        };
+      </script></body></html>`;
+    const w = await open(page, { params: { engine: "echo", matrix_user_id: ME }, state: [appState("notes", local, "Notes")] });
+    await w.getByRole("button", { name: "Load model" }).click();
+    await w.getByRole("button", { name: "Apps (1)" }).click();
+    await w.getByRole("button", { name: "Edit" }).click();
+    await w.getByRole("textbox", { name: "Change" }).fill("call it Our notes");
+    await w.getByRole("button", { name: "Change app" }).click();
+    await expect(w.locator('main[data-busy="false"]')).toBeVisible({ timeout: 30_000 });
+    // The echo model never fixes anything, so all attempts are used and the finding is shown.
+    await expect(w.getByText(/shares nothing: miniapp.send is never called/).first()).toBeVisible();
+    await expect(w.getByText("Asking the model to fix these problems…")).toHaveCount(2);
+    await expect(w.getByText(/^Tried the app out: /)).toHaveCount(3);
+});

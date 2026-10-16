@@ -1,42 +1,28 @@
 /*
  * The model behind one small interface. `WebLlmEngine` runs a WebLLM model on the
- * local GPU in a worker; `TransformersEngine` runs an ONNX model through
- * Transformers.js (for models WebLLM has no build of); `EchoEngine` (fragment `engine=echo`) needs no GPU and
+ * local GPU in a worker; `EchoEngine` (fragment `engine=echo`) needs no GPU and
  * exists for the mock-host tests and for trying the room plumbing quickly.
  */
 import { isAck, prefillRounds, type ChatMessage } from "./chat";
 
 export interface ModelInfo {
-    /** WebLLM model id without the quantisation suffix, or our own id for a Transformers.js model. */
+    /** WebLLM model id without the quantisation suffix. */
     id: string;
     label: string;
+    /** Which GPU it needs, shown next to the name. */
+    needs: string;
     /** Approximate download/VRAM in MB per quantisation, from WebLLM's prebuilt config. */
     f16MB: number;
     /** The f32 build, for GPUs without the shader-f16 extension; absent when WebLLM has none. */
     f32MB?: number;
-    /** Set for a Transformers.js model: the Hugging Face repo and the ONNX dtype per GPU kind. */
-    onnx?: { repo: string; f16: string; f32: string };
 }
 
 /** A curated subset of WebLLM's prebuilt models that fit an ordinary laptop GPU. */
 export const MODELS: ModelInfo[] = [
-    { id: "Qwen2.5-Coder-1.5B-Instruct", label: "Qwen 2.5 Coder 1.5B (runs on integrated GPUs)", f16MB: 1630, f32MB: 1889 },
-    { id: "Qwen2.5-Coder-3B-Instruct", label: "Qwen 2.5 Coder 3B (needs a dedicated GPU)", f16MB: 2505, f32MB: 2894 },
-    { id: "Qwen3.5-4B", label: "Qwen 3.5 4B (needs a dedicated GPU)", f16MB: 3868, f32MB: 4680 },
-    { id: "Qwen2.5-Coder-7B-Instruct", label: "Qwen 2.5 Coder 7B (best, needs a big GPU)", f16MB: 5107, f32MB: 5900 },
-    /*
-     * Mixture of experts: 8.3B parameters, 1.5B active per token, so it runs at
-     * about the speed of a 1.5B model but must keep all weights in memory. Liquid
-     * does not recommend it for programming; it is here to be measured
-     * (test/real/bench.mjs). LFM Open License, not OSI.
-     */
-    {
-        id: "LFM2-8B-A1B",
-        label: "LFM2 8B-A1B, mixture of experts (experimental)",
-        f16MB: 4790,
-        f32MB: 5330,
-        onnx: { repo: "onnx-community/LFM2-8B-A1B-ONNX", f16: "q4f16", f32: "q4" },
-    },
+    { id: "Qwen2.5-Coder-1.5B-Instruct", label: "Qwen 2.5 Coder 1.5B", needs: "any GPU", f16MB: 1630, f32MB: 1889 },
+    { id: "Qwen2.5-Coder-3B-Instruct", label: "Qwen 2.5 Coder 3B", needs: "dedicated GPU", f16MB: 2505, f32MB: 2894 },
+    { id: "Qwen3.5-4B", label: "Qwen 3.5 4B", needs: "dedicated GPU", f16MB: 3868, f32MB: 4680 },
+    { id: "Qwen2.5-Coder-7B-Instruct", label: "Qwen 2.5 Coder 7B", needs: "big GPU", f16MB: 5107, f32MB: 5900 },
 ];
 
 // 3B and up lost the device on a Radeon 860M (integrated) at any prompt part size.
@@ -59,11 +45,6 @@ export function webLlmId(m: ModelInfo, f16: boolean): string {
     return `${m.id}-${f16 ? "q4f16_1" : "q4f32_1"}-MLC`;
 }
 
-/** The id the loaded engine reports: WebLLM's full id, or ours for a Transformers.js model. */
-export function engineId(m: ModelInfo, f16: boolean): string {
-    return m.onnx ? `${m.id}-${f16 ? m.onnx.f16 : m.onnx.f32}` : webLlmId(m, f16);
-}
-
 export function sizeMB(m: ModelInfo, f16: boolean): number {
     return f16 ? m.f16MB : (m.f32MB ?? m.f16MB);
 }
@@ -82,13 +63,6 @@ export interface ChatOptions {
     /** Longest answer in tokens (default 768). */
     maxTokens?: number;
     temperature?: number;
-    /** Tokens processed, summed over all rounds; called once the answer is complete. */
-    onUsage?: (u: Usage) => void;
-}
-
-export interface Usage {
-    promptTokens: number;
-    completionTokens: number;
 }
 
 export interface Engine {
@@ -135,12 +109,6 @@ export async function webGpuStatus(): Promise<GpuStatus> {
 
 export async function isCached(m: ModelInfo, f16: boolean): Promise<boolean> {
     try {
-        if (m.onnx) {
-            // Transformers.js keeps downloads in this Cache Storage bucket, one entry per file.
-            const file = `${m.onnx.repo}/resolve/main/onnx/model_${f16 ? m.onnx.f16 : m.onnx.f32}.onnx_data`;
-            const keys = await (await caches.open("transformers-cache")).keys();
-            return keys.some((k) => k.url.includes(file));
-        }
         const webllm = await import("@mlc-ai/web-llm");
         return await webllm.hasModelInCache(webLlmId(m, f16));
     } catch {
@@ -148,8 +116,8 @@ export async function isCached(m: ModelInfo, f16: boolean): Promise<boolean> {
     }
 }
 
-export function loadModel(m: ModelInfo, f16: boolean, onProgress: (p: Progress) => void, contextWindow?: number): Promise<Engine> {
-    return m.onnx ? loadTransformers(m, f16, onProgress) : loadWebLlm(webLlmId(m, f16), onProgress, contextWindow);
+export function loadModel(m: ModelInfo, f16: boolean, onProgress: (p: Progress) => void, contextWindow = CONTEXT_WINDOW): Promise<Engine> {
+    return loadWebLlm(webLlmId(m, f16), onProgress, contextWindow);
 }
 
 class WebLlmEngine implements Engine {
@@ -164,11 +132,6 @@ class WebLlmEngine implements Engine {
         const extra_body = /^Qwen3/.test(this.modelId) ? { enable_thinking: false } : undefined;
         const { head, rounds } = prefillRounds(messages, opts.chunkChars ?? Infinity);
         const history: ChatMessage[] = [...head];
-        const usage: Usage = { promptTokens: 0, completionTokens: 0 };
-        const count = (u?: { prompt_tokens?: number; completion_tokens?: number } | null): void => {
-            usage.promptTokens += u?.prompt_tokens ?? 0;
-            usage.completionTokens += u?.completion_tokens ?? 0;
-        };
         const abort = (): void => this.engine.interruptGenerate();
         opts.signal?.addEventListener("abort", abort);
         try {
@@ -184,7 +147,6 @@ class WebLlmEngine implements Engine {
                     max_tokens: 16,
                     extra_body,
                 });
-                count(r.usage);
                 if (opts.signal?.aborted) return "";
                 history.push({ role: "assistant", content: r.choices[0]?.message.content ?? "" });
             }
@@ -193,7 +155,6 @@ class WebLlmEngine implements Engine {
                 const stream = await this.engine.chat.completions.create({
                     messages: history,
                     stream: true,
-                    stream_options: { include_usage: true },
                     temperature: opts.temperature ?? 0.6,
                     max_tokens: opts.maxTokens ?? 768,
                     extra_body,
@@ -201,8 +162,7 @@ class WebLlmEngine implements Engine {
                 let text = "";
                 for await (const chunk of stream) {
                     text += chunk.choices[0]?.delta?.content ?? "";
-                    if (chunk.usage) count(chunk.usage);
-                    else onText(text);
+                    onText(text);
                 }
                 return text;
             };
@@ -215,7 +175,6 @@ class WebLlmEngine implements Engine {
                 history.push({ role: "user", content: "Do not reply OK. The material is complete. Write your full answer to the request now." });
                 text = await answer();
             }
-            opts.onUsage?.(usage);
             return text;
         } finally {
             opts.signal?.removeEventListener("abort", abort);
@@ -229,7 +188,7 @@ class WebLlmEngine implements Engine {
     }
 }
 
-export async function loadWebLlm(modelId: string, onProgress: (p: Progress) => void, contextWindow = CONTEXT_WINDOW): Promise<Engine> {
+async function loadWebLlm(modelId: string, onProgress: (p: Progress) => void, contextWindow: number): Promise<Engine> {
     const webllm = await import("@mlc-ai/web-llm");
     const worker = new Worker(new URL("./llm.worker.ts", import.meta.url), { type: "module" });
     try {
@@ -246,85 +205,11 @@ export async function loadWebLlm(modelId: string, onProgress: (p: Progress) => v
     }
 }
 
-import type { TfRequest, TfResponse } from "./tf.worker";
-
-/**
- * A Transformers.js model in its own worker. No prompt rounds: ONNX Runtime has
- * no kept KV cache between calls here, so the prompt is processed in one pass
- * (on an integrated GPU that needs a raised driver timeout, see README).
- */
-class TransformersEngine implements Engine {
-    private lost: string | null = null;
-    private listener: ((m: TfResponse) => void) | null = null;
-
-    constructor(
-        readonly modelId: string,
-        private worker: Worker,
-    ) {
-        worker.onmessage = (e: MessageEvent<TfResponse>) => {
-            if (e.data.op === "error" && /device lost/i.test(e.data.message)) this.lost = e.data.message;
-            this.listener?.(e.data);
-        };
-    }
-
-    private send(req: TfRequest): void {
-        this.worker.postMessage(req);
-    }
-
-    async chat(messages: ChatMessage[], onText: (soFar: string) => void, opts: ChatOptions = {}): Promise<string> {
-        if (this.lost) throw new Error(this.lost);
-        const abort = (): void => this.send({ op: "stop" });
-        opts.signal?.addEventListener("abort", abort);
-        try {
-            return await new Promise<string>((resolve, reject) => {
-                let text = "";
-                this.listener = (m) => {
-                    if (m.op === "text") onText((text += m.text));
-                    else if (m.op === "done") {
-                        opts.onUsage?.({ promptTokens: m.promptTokens, completionTokens: m.completionTokens });
-                        resolve(text);
-                    } else if (m.op === "error") reject(new Error(m.message));
-                };
-                this.send({ op: "chat", messages, maxTokens: opts.maxTokens ?? 768 });
-            });
-        } finally {
-            this.listener = null;
-            opts.signal?.removeEventListener("abort", abort);
-        }
-    }
-
-    async unload(): Promise<void> {
-        this.worker.terminate();
-    }
-}
-
-async function loadTransformers(m: ModelInfo, f16: boolean, onProgress: (p: Progress) => void): Promise<Engine> {
-    const worker = new Worker(new URL("./tf.worker.ts", import.meta.url), { type: "module" });
-    try {
-        await new Promise<void>((resolve, reject) => {
-            worker.onmessage = (e: MessageEvent<TfResponse>) => {
-                const r = e.data;
-                if (r.op === "progress" && r.total > 0)
-                    onProgress({ fraction: r.loaded / r.total, text: `${(r.loaded / 1e9).toFixed(2)} of ${(r.total / 1e9).toFixed(2)} GB` });
-                else if (r.op === "ready") resolve();
-                else if (r.op === "error") reject(new Error(r.message));
-            };
-            const vendor = new URL("vendor/", window.location.href).href;
-            worker.postMessage({ op: "load", repo: m.onnx!.repo, dtype: f16 ? m.onnx!.f16 : m.onnx!.f32, vendor } satisfies TfRequest);
-        });
-    } catch (e) {
-        worker.terminate();
-        throw e;
-    }
-    // Takes over the worker's messages from here on.
-    return new TransformersEngine(engineId(m, f16), worker);
-}
-
 /** Answers with the template from the prompt, renamed. Deterministic, instant, no GPU. */
 export class EchoEngine implements Engine {
     readonly modelId = "echo";
 
-    async chat(messages: ChatMessage[], onText: (soFar: string) => void, opts: ChatOptions = {}): Promise<string> {
+    async chat(messages: ChatMessage[], onText: (soFar: string) => void): Promise<string> {
         const all = messages.map((m) => m.content).join("\n");
         // Settings-only mode: the request becomes the title; "code" in it asks for code instead.
         const settings = all.match(/Its settings now:\n```json\n([\s\S]*?)\n```/)?.[1];
@@ -340,7 +225,6 @@ export class EchoEngine implements Engine {
         const html = (current ?? template).replace(/<title>[^<]*<\/title>/, `<title>${request.slice(0, 40).replace(/[<&]/g, "")}</title>`);
         const text = `Here is the app.\n\n\`\`\`html\n${html}\n\`\`\``;
         onText(text);
-        opts.onUsage?.({ promptTokens: all.length >> 2, completionTokens: text.length >> 2 });
         return text;
     }
 

@@ -17,7 +17,7 @@ import { chromium } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 
-const ALL = ["Qwen2.5-Coder-1.5B-Instruct", "Qwen2.5-Coder-3B-Instruct", "Qwen3.5-4B", "Qwen2.5-Coder-7B-Instruct", "LFM2-8B-A1B"];
+const ALL = ["Qwen2.5-Coder-1.5B-Instruct", "Qwen2.5-Coder-3B-Instruct", "Qwen3.5-4B", "Qwen2.5-Coder-7B-Instruct"];
 const models = process.env.MODELS ? process.env.MODELS.split(",") : ALL;
 const TASK_TIMEOUT = Number(process.env.TASK_TIMEOUT ?? 420) * 1000;
 const LOAD_TIMEOUT = 20 * 60_000;

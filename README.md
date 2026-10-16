@@ -30,7 +30,7 @@ change to it. **undo** goes back a version, and **new app** starts over.
 
 | Part | What it is |
 |---|---|
-| Model | WebLLM on WebGPU, in a worker, with an 8k context window. Qwen 2.5 Coder 1.5B is the default and runs on integrated GPUs; 3B, Qwen 3.5 4B and 7B are offered for dedicated GPUs. |
+| Model | WebLLM on WebGPU, in a worker, with an 8k context window. Qwen 2.5 Coder 1.5B is the default and runs on integrated GPUs; 3B, Qwen 3.5 4B and 7B are offered for dedicated GPUs. Optionally colibri, a server on your own machine (see below). |
 | Skills | `src/skills/`: the miniapp API, the rules, and nine working templates (poll, checklist, board game for two, kanban board, random picker, scoreboard, countdown, drawing, blank). A new app always starts from the closest template; small models adapt working code much better than they write from scratch. |
 | Checks | Before an app runs, it is checked for network use, external files, browser storage, `alert` and a cut-off file. Problems go back to the model once, automatically. So does an error the preview reports when the app starts; after that, the "Ask the model to fix it" button does it. |
 | Sandbox | Apps run in `sandbox.html` inside `<iframe sandbox="allow-scripts">`: an opaque origin with its own CSP (inline code only, **no network**). An app cannot reach the widget, the user's account or storage. |
@@ -87,8 +87,9 @@ everyone who opens the app.
 
 No, apart from downloading the model once. The model runs on your GPU, the apps are stored
 in the room, and running them needs nothing outside the browser. The production CSP allows
-network access only to Hugging Face (weights) and `raw.githubusercontent.com` (WebLLM's
-compiled model libraries). Apps themselves have no network at all.
+network access only to Hugging Face (weights), `raw.githubusercontent.com` (WebLLM's
+compiled model libraries) and loopback (`http://127.0.0.1:*`, `http://localhost:*`) for the
+optional colibri engine on your own machine. Apps themselves have no network at all.
 
 The cost of staying local is model quality. Tested on a Radeon 860M with Coder 1.5B:
 
@@ -97,8 +98,58 @@ The cost of staying local is model quality. Tested on a Radeon 860M with Coder 1
 - **Anything further from a template often breaks:** a countdown and a German wheel of
   fortune came out with syntax errors, cut-off files or missing logic. The automatic fix
   rounds catch some of it, not all.
-Adding a hosted model as an optional engine would raise the quality a lot, but it would send
-prompts to that provider and needs a key in the browser.
+A hosted model would raise the quality a lot, but it would send prompts to that provider and
+needs a key in the browser. colibri gives bigger models that stay on your machine.
+
+## colibri: big models on your own machine (optional)
+
+[colibri](https://github.com/JustVugg/colibri) runs large mixture-of-experts models on an
+ordinary computer's CPU, streaming the experts from disk, and offers an OpenAI-compatible API.
+Choose **colibri (local server)** in the model list, then start colibri so that the widget's
+page may call it:
+
+```sh
+coli serve --model ~/colibri-models/qwen3-coder-30b --cors-origin https://marcade.store
+```
+
+(`--cors-origin http://localhost:5173` for `pnpm dev`.) The builder shows this command, with
+its own origin, whenever it cannot reach the server. **Load model** asks the server for its
+model (`GET /v1/models`); requests stream from `/v1/chat/completions` and Stop aborts them.
+The whole prompt goes at once: a server has no GPU prefill limit, so there are no prompt rounds,
+and a colibri error never triggers the GPU-reset recovery. colibri sends empty keepalives while
+it reads a long prompt, which keep the stall watchdog quiet.
+
+- **Only this machine.** The CSP allows loopback only. A server on the LAN would need its address
+  in `connect-src` (`LOCAL_ENGINE` in `vite.config.ts`), at build time.
+- **Server address and API key** (if the server sets `COLI_API_KEY`) are kept in this browser's
+  preferences, never in the room.
+- **Model:** Qwen3-Coder-30B-A3B (`./start-here.sh --model qwen3-coder-30b`, 19 GB, 8–18 GB RAM)
+  is the one to use. OLMoE answers at most 1024 tokens with a 4k context, too little for an app.
+- **Cache all its experts** when the RAM allows (`--cap 128`, about 15 GB): with the default 8 per
+  layer, three quarters of the time went to disk reads and it wrote 1.5 tokens/s instead of 7–10.
+
+Benchmark on the same laptop's CPU (Ryzen AI 7 350, 16 threads, 46 GB; another job was using the
+GPU and some CPU meanwhile), colibri at bf24429, Qwen3-Coder-30B-A3B with `--cap 128`, one run
+each:
+
+| Task | Result | Time |
+|---|---|---|
+| poll | works, settings only | 26 s |
+| list | works, settings only | 18 s |
+| guestbook (no template) | works, code | 110 s |
+| poll with `settings=0` (code) | works | 153 s |
+| tic-tac-toe for two (`tictactoe`) | works, first answer, from the board game template | 265 s |
+
+5 of 5 apps work, none needed a fix round. Code is written at 8–10 tokens/s, prompts of
+1,200–2,400 tokens included; a 118-line game took about 2 minutes of generation. That is slower
+per app than Coder 1.5B on the GPU (about 50 s), but a 30B model.
+- **Local Network Access.** An https page calling loopback needs the user's permission in Chrome
+  (142 and later). In Chromium 153 the request fails at once (`Failed to fetch`, nothing
+  reaches the server) until permission is granted, and the permission belongs to the
+  **top-level** page: inside Element it is Element's origin that asks, and granting it to the
+  widget's own origin does nothing. With it granted, the widget's frame reached colibri with or
+  without an `allow` attribute. (Tested headless with the permission granted by Playwright; how
+  the prompt looks in Element and the Player is not checked yet.)
 
 ## Which model on which machine
 
@@ -196,7 +247,10 @@ pnpm test:e2e                               # Playwright, mock host, echo engine
 HEADED=1 node test/real/build.mjs [model]   # real model on your GPU (after pnpm build)
 node test/real/bench.mjs                    # which model is best on this machine: builds four apps
                                             # per model, clicks and types in them, ranks the models
+MODELS=colibri node test/real/bench.mjs     # the same against a running colibri (see the file)
 ```
+
+The e2e tests run colibri against a small fake OpenAI-compatible server (`test/e2e/fake-colibri.mjs`).
 
 ## Icon
 

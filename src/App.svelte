@@ -2,6 +2,7 @@
     import AppFrame from "./AppFrame.svelte";
     import type { Controller } from "./controller.svelte";
     import { sizeMB } from "./llm";
+    import { COLIBRI, serveCommand } from "./colibri";
     import { TEMPLATES, settingsOf } from "./skills";
     import { ACCENTS, accentOf } from "./apps";
 
@@ -135,21 +136,41 @@
                         {#each c.models as m (m.id)}
                             <option value={m.id}>{m.label} · {gb(sizeMB(m, c.f16))} GB · {c.cached[m.id] ? "downloaded" : m.needs}</option>
                         {/each}
+                        <option value={COLIBRI}>colibri (local server) · big models on this machine's CPU</option>
                     </select>
                 </label>
                 {#if c.engineStatus === "ready"}
                     <button type="button" class="secondary" onclick={() => c.unloadModel()}>Unload</button>
                 {:else}
-                    <button type="button" onclick={() => c.loadModel()} disabled={c.engineStatus === "loading" || (!!c.gpuProblem && !c.useEcho)}>
+                    <button type="button" onclick={() => c.loadModel()} disabled={c.engineStatus === "loading" || (!!c.gpuProblem && !c.useEcho && !c.useColibri)}>
                         {c.engineStatus === "loading" ? "Loading…" : "Load model"}
                     </button>
                 {/if}
             </section>
+            {#if c.useColibri}
+                <section class="model colibri">
+                    <label class="grow">
+                        <span>colibri server</span>
+                        <input type="url" bind:value={c.settings.colibriUrl} onchange={() => c.saveSettings()} disabled={c.engineStatus !== "idle" && c.engineStatus !== "error"} />
+                    </label>
+                    <label>
+                        <span>API key, if it has one</span>
+                        <input type="password" bind:value={c.settings.colibriKey} onchange={() => c.saveSettings()} autocomplete="off" disabled={c.engineStatus !== "idle" && c.engineStatus !== "error"} />
+                    </label>
+                </section>
+                {#if c.engineStatus !== "ready"}
+                    <p class="small muted">
+                        <a href="https://github.com/JustVugg/colibri" target="_blank" rel="noreferrer">colibri</a> runs large models on your own
+                        machine. Start it so that this page may call it: <code>{serveCommand(c.settings.colibriUrl, location.origin)}</code>. The
+                        address and key stay in this browser.
+                    </p>
+                {/if}
+            {/if}
             {#if c.engineStatus === "loading"}
                 <progress max="100" value={Math.round(c.progress * 100)}></progress>
                 <p class="small muted">{c.progressText}</p>
             {:else if c.engineStatus === "ready"}
-                <p class="small ok">Ready: {c.model}. Runs locally; your requests never leave this browser.</p>
+                <p class="small ok">Ready: {c.model}. {c.engineWhere}</p>
             {:else if c.engineStatus === "error"}
                 <p class="note warn">{c.engineError}</p>
             {/if}

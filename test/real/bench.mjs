@@ -9,6 +9,16 @@
 //   HEADED=1 ...                                          # watch it
 //   REPEAT=3 TASKS=poll,list LABEL=baseline ...           # repeat, pick tasks, name the results file
 //   PARAMS="settings=0&probe=0" ...                       # widget parameters, to compare features
+//   PORT=4190 ...                                         # serve the build on another port (default 4184)
+//
+// colibri (a `coli serve` on this machine) is the model "colibri"; it is not in the
+// default list. Start colibri with this page's origin allowed, then:
+//
+//   coli serve --model ~/colibri-models/qwen3-coder-30b --cors-origin http://localhost:4184
+//   MODELS=colibri COLIBRI_URL=http://127.0.0.1:8000 node test/real/bench.mjs
+//
+// COLIBRI_KEY passes its API key. A CPU model is slower than a GPU: the task timeout
+// for colibri defaults to 30 minutes.
 //
 // Models are cached in test/real/.profile, so each downloads once. Results go to
 // test/real/bench-results.json and a table on stdout; each app's code and a
@@ -19,7 +29,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 const ALL = ["Qwen2.5-Coder-1.5B-Instruct", "Qwen2.5-Coder-3B-Instruct", "Qwen3.5-4B", "Qwen2.5-Coder-7B-Instruct"];
 const models = process.env.MODELS ? process.env.MODELS.split(",") : ALL;
-const TASK_TIMEOUT = Number(process.env.TASK_TIMEOUT ?? 420) * 1000;
+const PORT = Number(process.env.PORT ?? 4184);
+const COLIBRI = { colibriUrl: process.env.COLIBRI_URL ?? "http://127.0.0.1:8000", colibriKey: process.env.COLIBRI_KEY ?? "" };
+const taskTimeout = (model) => Number(process.env.TASK_TIMEOUT ?? (model === "colibri" ? 1800 : 420)) * 1000;
 const LOAD_TIMEOUT = 20 * 60_000;
 const TOKEN = "bench-kiwi-42";
 
@@ -38,6 +50,8 @@ const ALL_TASKS = [
     // No template fits these: how the model does on its own.
     { id: "guestbook", request: "A guestbook where everyone can leave a short message", check: addsText },
     { id: "ideas", request: "An idea board where everyone posts ideas and can upvote them", check: addsText },
+    // A game with turns, seats and win detection: where small models fail.
+    { id: "tictactoe", request: "Tic-tac-toe for two players in the room: take turns, show whose turn it is and who won", check: clickChanges },
 ];
 const TASKS = process.env.TASKS ? ALL_TASKS.filter((t) => process.env.TASKS.split(",").includes(t.id)) : ALL_TASKS;
 const REPEAT = Number(process.env.REPEAT ?? 1);
@@ -138,12 +152,12 @@ async function shows(app) {
     }
 }
 
-const server = spawn("node", ["test/e2e/server.mjs"], { stdio: "ignore" });
+const server = spawn("node", ["test/e2e/server.mjs"], { stdio: "ignore", env: { ...process.env, PORT: String(PORT) } });
 await new Promise((r) => setTimeout(r, 800));
 const context = await chromium.launchPersistentContext("test/real/.profile", {
     channel: "chromium",
     headless: !process.env.HEADED,
-    baseURL: "http://localhost:4184",
+    baseURL: `http://localhost:${PORT}`,
     // Headless Chrome otherwise may pick SwiftShader, WebGPU on the CPU: minutes per answer.
     args: ["--enable-unsafe-webgpu", "--enable-features=Vulkan", "--ignore-gpu-blocklist", "--use-angle=vulkan"],
     ignoreDefaultArgs: ["--use-angle=swiftshader-webgl"],
@@ -157,11 +171,11 @@ for (const model of models) {
     results.push(result);
     const page = await context.newPage();
     await page.addInitScript(
-        ([model, params]) => {
-            localStorage.setItem("widget-builder.settings", JSON.stringify({ modelId: model }));
+        ([model, params, colibri]) => {
+            localStorage.setItem("widget-builder.settings", JSON.stringify({ modelId: model, ...colibri }));
             window.__TEST_FIXTURE__ = { params: { ...params, matrix_user_id: "@alice:example.org" } };
         },
-        [model, PARAMS],
+        [model, PARAMS, COLIBRI],
     );
     await page.goto("/__test__/index.html");
     const w = page.frameLocator("iframe");
@@ -180,7 +194,9 @@ for (const model of models) {
         if (!(await w.getByText(/^Ready:/).count())) throw new Error(await w.locator(".note.warn").first().innerText());
         result.loaded = true;
         result.loadSeconds = Math.round((Date.now() - t0) / 1000);
-        console.log(`loaded in ${result.loadSeconds} s`);
+        // colibri: which model the server runs ("Ready: <id>. Runs on colibri…").
+        if (model === "colibri") result.served = (await w.getByText(/^Ready:/).innerText()).match(/^Ready: (.+?)\. Runs/)?.[1] ?? null;
+        console.log(`loaded in ${result.loadSeconds} s${result.served ? `: ${result.served}` : ""}`);
     } catch (e) {
         result.error = `load: ${String(e.message ?? e).split("\n")[0].slice(0, 160)}`;
         console.log(result.error);
@@ -199,7 +215,7 @@ for (const model of models) {
             await w.locator('main[data-busy="true"]').waitFor({ timeout: 10_000 });
             // Idle for 5 s in a row: an automatic fix may start right after the first answer.
             for (let idle = 0; idle < 5; ) {
-                if (Date.now() - t1 > TASK_TIMEOUT) throw new Error("timed out");
+                if (Date.now() - t1 > taskTimeout(model)) throw new Error("timed out");
                 await page.waitForTimeout(1000);
                 idle = (await w.locator('main[data-busy="false"]').count()) ? idle + 1 : 0;
             }
@@ -237,7 +253,7 @@ server.kill();
 
 // Rank: apps that work first, then apps that at least start, then speed.
 const score = (r) => r.tasks.filter((t) => t.works).length * 10 + r.tasks.filter((t) => t.starts).length * 3 - r.resets;
-const time = (r) => r.tasks.reduce((s, t) => s + (t.seconds ?? TASK_TIMEOUT / 1000), 0);
+const time = (r) => r.tasks.reduce((s, t) => s + (t.seconds ?? taskTimeout(r.model) / 1000), 0);
 const ranked = [...results].sort((a, b) => score(b) - score(a) || time(a) - time(b));
 
 console.log(`\nGPU: ${gpu}\n`);
@@ -248,7 +264,7 @@ ranked.forEach((r, i) => {
     const starts = r.tasks.filter((t) => t.starts).length;
     console.log(
         r.loaded
-            ? `| ${i + 1} | ${r.model} | ${r.loadSeconds} s | ${works}/${r.tasks.length} (${Math.round((works / r.tasks.length) * 100)}%) | ${starts}/${r.tasks.length} | ${time(r)} s | ${r.resets} |`
+            ? `| ${i + 1} | ${r.served ? `colibri: ${r.served}` : r.model} | ${r.loadSeconds} s | ${works}/${r.tasks.length} (${Math.round((works / r.tasks.length) * 100)}%) | ${starts}/${r.tasks.length} | ${time(r)} s | ${r.resets} |`
             : `| – | ${r.model} | ${r.error} | | | | |`,
     );
 });

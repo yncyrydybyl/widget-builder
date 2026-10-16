@@ -9,8 +9,10 @@ import type { Plugin } from "vite";
  * weights from Hugging Face (which redirects to its *.hf.co CDNs) and the compiled
  * model library (.wasm) from raw.githubusercontent.com, and instantiating that wasm
  * needs 'wasm-unsafe-eval'. Room content never leaves the browser — inference runs
- * on the local GPU. `frame-ancestors` cannot be set from <meta>; the serving nginx
- * adds it.
+ * on the local GPU — except to colibri, the optional engine, which is a server on
+ * this same machine: loopback only (LOCAL_ENGINE). A server on the LAN would need its
+ * address here, at build time. `frame-ancestors` cannot be set from <meta>; the
+ * serving nginx adds it.
  */
 const MODEL_HOSTS = [
     "https://huggingface.co",
@@ -18,10 +20,11 @@ const MODEL_HOSTS = [
     "https://*.hf.co",
     "https://raw.githubusercontent.com",
 ].join(" ");
+const LOCAL_ENGINE = "http://127.0.0.1:* http://localhost:*";
 
 const CSP =
     "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; " +
-    `font-src 'self'; connect-src 'self' ${MODEL_HOSTS}; worker-src 'self'; object-src 'none'; ` +
+    `font-src 'self'; connect-src 'self' ${MODEL_HOSTS} ${LOCAL_ENGINE}; worker-src 'self'; object-src 'none'; ` +
     // Apps run in frames of our own sandbox.html (public/, with its own, stricter policy).
     "frame-src 'self'; form-action 'none'; base-uri 'none'; manifest-src 'none'";
 

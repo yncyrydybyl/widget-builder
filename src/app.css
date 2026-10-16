@@ -50,12 +50,15 @@ label.grow { flex: 1; min-width: 0; }
 label.check > span { color: var(--fg); }
 
 .model { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-select, input[type="text"], input[type="number"], input[type="datetime-local"], textarea {
+select, input[type="text"], input[type="url"], input[type="password"], input[type="number"], input[type="datetime-local"], textarea {
     font: inherit; color: var(--fg); background: var(--bg);
     border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; min-width: 0;
 }
 select { flex: 1; }
 input[type="number"] { width: 4.5em; }
+.colibri input[type="url"] { flex: 1; }
+.colibri input[type="password"] { width: 10em; }
+code { overflow-wrap: anywhere; }
 
 button {
     font: inherit; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg);
